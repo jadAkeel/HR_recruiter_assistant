@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 from jose import JWTError, jwt
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -96,15 +96,61 @@ async def register_user(session: AsyncSession, email: str, password: str, full_n
     if result.scalar_one_or_none():
         raise ValueError("Email already registered")
 
+    role = "candidate"
+    if settings.first_user_owner_enabled:
+        result = await session.execute(select(func.count()).select_from(User))
+        if (result.scalar() or 0) == 0:
+            role = "owner"
+
     user = User(
         id=str(uuid.uuid4()),
         email=email,
         password_hash=hash_password(password),
         full_name=full_name,
-        role="candidate",
+        role=role,
     )
     session.add(user)
     await session.commit()
+    return user
+
+
+async def ensure_initial_owner(session: AsyncSession) -> User | None:
+    """
+    Creates or promotes a configured owner account when no owner exists.
+    """
+    email = settings.initial_owner_email
+    password = settings.initial_owner_password
+    if not email and not password:
+        return None
+    if not email or not password:
+        raise RuntimeError("INITIAL_OWNER_EMAIL and INITIAL_OWNER_PASSWORD must be configured together")
+    if len(password) < 8:
+        raise RuntimeError("INITIAL_OWNER_PASSWORD must be at least 8 characters")
+
+    owner_result = await session.execute(select(User).where(User.role == "owner"))
+    if owner_result.scalar_one_or_none() is not None:
+        return None
+
+    normalized_email = normalize_email(email)
+    user_result = await session.execute(select(User).where(User.email == normalized_email))
+    user = user_result.scalar_one_or_none()
+    if user is None:
+        user = User(
+            id=str(uuid.uuid4()),
+            email=normalized_email,
+            password_hash=hash_password(password),
+            full_name=" ".join(settings.initial_owner_full_name.strip().split()) or "Initial Owner",
+            role="owner",
+        )
+        session.add(user)
+    else:
+        user.password_hash = hash_password(password)
+        user.role = "owner"
+        if not user.full_name.strip():
+            user.full_name = " ".join(settings.initial_owner_full_name.strip().split()) or "Initial Owner"
+
+    await session.commit()
+    await session.refresh(user)
     return user
 
 

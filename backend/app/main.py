@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -18,6 +20,59 @@ from app.core.redis import close_redis, get_redis
 from app.core.security import RateLimitMiddleware, SecurityHeadersMiddleware
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_keep_alive_url() -> str | None:
+    """
+    Resolves the public URL used to keep Render free services warm.
+    """
+    if settings.keep_alive_url:
+        return settings.keep_alive_url
+    render_host = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+    if render_host:
+        return f"https://{render_host}{settings.api_prefix}/health"
+    return None
+
+
+def _should_run_keep_alive() -> bool:
+    """
+    Enables keep-alive when explicitly configured or when running on Render.
+    """
+    return settings.keep_alive_enabled or bool(os.environ.get("RENDER_EXTERNAL_HOSTNAME"))
+
+
+async def _keep_alive_worker() -> None:
+    """
+    Periodically pings the public health endpoint to reduce Render idle spin-downs.
+    """
+    url = _resolve_keep_alive_url()
+    if not url:
+        logger.warning("Keep-alive enabled but no public URL is configured")
+        return
+
+    interval = max(settings.keep_alive_interval_seconds, 60.0)
+    await asyncio.sleep(interval)
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        while True:
+            try:
+                response = await client.get(url)
+                logger.debug("Keep-alive ping returned %s from %s", response.status_code, url)
+            except Exception:
+                logger.warning("Keep-alive ping failed for %s", url, exc_info=True)
+            await asyncio.sleep(interval)
+
+
+async def _ensure_initial_owner() -> None:
+    """
+    Ensures a configured owner account exists before serving requests.
+    """
+    from app.core.db import SessionLocal
+    from app.services.auth import ensure_initial_owner
+
+    async with SessionLocal() as session:
+        owner = await ensure_initial_owner(session)
+        if owner is not None:
+            logger.info("Initial owner account is ready: %s", owner.email)
 
 
 # Background worker that processes CV uploads from the task queue
@@ -180,10 +235,12 @@ async def lifespan(_: FastAPI):
     try:
         settings.validate_runtime()
         await init_db()
+        await _ensure_initial_owner()
         if settings.is_production and await get_redis() is None:
             raise RuntimeError("Redis is required for production CV task queueing")
         logger.info("Embedding provider: %s", settings.embedding_provider)
         worker_task = asyncio.create_task(_cv_worker()) if settings.run_cv_worker_in_api else None
+        keep_alive_task = asyncio.create_task(_keep_alive_worker()) if _should_run_keep_alive() else None
         if worker_task is None:
             logger.info("In-process CV worker disabled; expecting external worker service")
         yield
@@ -191,6 +248,12 @@ async def lifespan(_: FastAPI):
             worker_task.cancel()
             try:
                 await worker_task
+            except asyncio.CancelledError:
+                pass
+        if keep_alive_task is not None:
+            keep_alive_task.cancel()
+            try:
+                await keep_alive_task
             except asyncio.CancelledError:
                 pass
     finally:

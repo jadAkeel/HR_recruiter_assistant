@@ -33,6 +33,16 @@ services:
         value: "localhost,127.0.0.1"
       - key: RUN_CV_WORKER_IN_API
         value: "true"
+      - key: KEEP_ALIVE_ENABLED
+        value: "true"
+      - key: KEEP_ALIVE_INTERVAL_SECONDS
+        value: "270"
+      - key: FIRST_USER_OWNER_ENABLED
+        value: "true"
+      - key: INITIAL_OWNER_EMAIL
+        sync: false # Optional: set with INITIAL_OWNER_PASSWORD to create/promote a fixed admin account
+      - key: INITIAL_OWNER_PASSWORD
+        sync: false # Optional: must be at least 8 characters
       - key: EMBEDDING_PROVIDER
         value: "sentence-transformers"
       - key: LLM_PROVIDER

@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     matching_rerank_timeout_seconds: float = 20.0
     redis_url: str = "redis://localhost:6379/0"
     run_cv_worker_in_api: bool = True
+    keep_alive_enabled: bool = False
+    keep_alive_interval_seconds: float = 270.0
+    keep_alive_url: str | None = None
 
     # LLM provider: ollama (local) or openai
     llm_provider: str = "ollama"
@@ -41,6 +44,10 @@ class Settings(BaseSettings):
     jwt_secret_key: str = DEFAULT_JWT_SECRET
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
+    first_user_owner_enabled: bool = False
+    initial_owner_email: str | None = None
+    initial_owner_password: str | None = None
+    initial_owner_full_name: str = "Initial Owner"
 
     # OpenAI (used when provider=openai, or for voice STT/TTS)
     openai_api_key: str | None = None

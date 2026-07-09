@@ -224,6 +224,11 @@ Ollama models are pulled automatically on startup: `llama3.2`, `gemma3:4b`, `nom
 | `MAX_UPLOAD_BYTES` | `15728640` | Max upload size (15MB) |
 | `RATE_LIMIT_ENABLED` | `true` | Enable rate limiting middleware |
 | `RUN_CV_WORKER_IN_API` | `true` | Run CV queue worker in API process |
+| `KEEP_ALIVE_ENABLED` | `false` | Enable periodic public health pings for Render demos |
+| `KEEP_ALIVE_INTERVAL_SECONDS` | `270` | Keep-alive interval in seconds; values below 60 are clamped |
+| `KEEP_ALIVE_URL` | auto from `RENDER_EXTERNAL_HOSTNAME` | Optional explicit URL to ping for keep-alive |
+| `FIRST_USER_OWNER_ENABLED` | `false` | Promote the first registered account to owner when no users exist |
+| `INITIAL_OWNER_EMAIL` / `INITIAL_OWNER_PASSWORD` | not set | Optional fixed owner account created/promoted on startup when no owner exists |
 | `SMTP_*` | — | Email configuration for interview invitations |
 
 ---

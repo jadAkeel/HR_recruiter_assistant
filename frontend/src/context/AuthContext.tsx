@@ -8,12 +8,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(() => Boolean(localStorage.getItem('access_token')));
 
+  const bootstrapOwnerIfNeeded = async (me: User) => {
+    if (me.role !== 'candidate') return me;
+    try {
+      const { data } = await api.post<User>('/auth/bootstrap-admin');
+      return data;
+    } catch {
+      return me;
+    }
+  };
+
   useEffect(() => {
     const token = localStorage.getItem('access_token');
     if (!token) return;
 
     let active = true;
-    api.get<User>('/auth/me').then(({ data }) => {
+    api.get<User>('/auth/me').then(({ data }) => bootstrapOwnerIfNeeded(data)).then((data) => {
       if (active) setUser(data);
     }).catch(() => {
       if (active) localStorage.clear();
@@ -29,8 +39,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('access_token', data.access_token);
     localStorage.setItem('refresh_token', data.refresh_token);
     const { data: me } = await api.get<User>('/auth/me');
-    setUser(me);
-    return me;
+    const bootstrapped = await bootstrapOwnerIfNeeded(me);
+    setUser(bootstrapped);
+    return bootstrapped;
   };
 
   const register = async (email: string, password: string, full_name: string) => {
