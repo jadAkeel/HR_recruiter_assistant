@@ -12,7 +12,7 @@ export default function Matching() {
   const [selectedJobId, setSelectedJobId] = useState(() => window.localStorage.getItem(MATCHING_JOB_STORAGE_KEY) || '');
   const [results, setResults] = useState<MatchResult[]>([]);
   const [loading, setLoading] = useState(false);
-  const [savedLoading, setSavedLoading] = useState(false);
+  const [savedLoading, setSavedLoading] = useState(Boolean(selectedJobId));
   const [resultSource, setResultSource] = useState<'none' | 'saved' | 'fresh'>('none');
   const [minScore, setMinScore] = useState(0);
   const [showOverqualified, setShowOverqualified] = useState(false);
@@ -65,20 +65,8 @@ export default function Matching() {
   }, []);
 
   useEffect(() => {
-    if (!selectedJobId) {
-      window.localStorage.removeItem(MATCHING_JOB_STORAGE_KEY);
-      setResults([]);
-      setResultSource('none');
-      setSavedLoading(false);
-      return;
-    }
+    if (!selectedJobId) return;
 
-    window.localStorage.setItem(MATCHING_JOB_STORAGE_KEY, selectedJobId);
-    setPreviewCandidate(null);
-    setExpandedAnalysis(null);
-    setPage(1);
-    setError(null);
-    setSavedLoading(true);
     const requestId = ++savedLoadRequestRef.current;
 
     api.get<{ results?: MatchResult[] }>(`/jobs/${selectedJobId}/matches`)
@@ -101,6 +89,24 @@ export default function Matching() {
   }, [selectedJobId]);
 
   const hasFilters = search || selectedSkills.length > 0 || minYears !== '' || maxYears !== '' || educationSearch || university || degree;
+
+  const handleJobChange = (jobId: string) => {
+    savedLoadRequestRef.current += 1;
+    setSelectedJobId(jobId);
+    setPreviewCandidate(null);
+    setExpandedAnalysis(null);
+    setPage(1);
+    setError(null);
+    setResults([]);
+    setResultSource('none');
+    setSavedLoading(Boolean(jobId));
+
+    if (jobId) {
+      window.localStorage.setItem(MATCHING_JOB_STORAGE_KEY, jobId);
+    } else {
+      window.localStorage.removeItem(MATCHING_JOB_STORAGE_KEY);
+    }
+  };
 
   const clearFilters = () => {
     setSearch('');
@@ -398,7 +404,7 @@ export default function Matching() {
       {/* ── Job Selection ── */}
       <div className="bg-white rounded-xl shadow-sm border p-6 mb-4">
         <div className="flex gap-3 mb-4">
-          <select value={selectedJobId} onChange={(e) => setSelectedJobId(e.target.value)}
+          <select value={selectedJobId} onChange={(e) => handleJobChange(e.target.value)}
             className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white">
             <option value="">-- Select a Job --</option>
             {jobs.map((job) => (

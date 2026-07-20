@@ -440,7 +440,7 @@ export default function PublicInterview() {
                   {evaluating ? <Loader className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
                   {evaluating ? 'Loading result...' : 'Show Final Result'}
                 </button>
-              ) : true && (
+              ) : (
                 <button
                   onClick={submitAnswer}
                   disabled={!canSubmitCurrent || !currentAnswer.trim() || submitting || evaluating}
