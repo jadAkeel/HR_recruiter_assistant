@@ -144,6 +144,7 @@ An AI-powered recruitment automation platform that covers the entire hiring life
 ### Security & Production
 - JWT authentication with access/refresh token rotation
 - Role-based access control (admin, recruiter, candidate)
+- Staff workspace isolation: owner, admin, and recruiter accounts only see their own jobs, candidates, matches, reports, feedback, and interviews
 - Rate limiting middleware
 - Security headers (CSP, HSTS, X-Frame-Options, etc.)
 - Trusted hosts validation
@@ -725,3 +726,11 @@ pytest tests/test_production_readiness_foundation.py -v
 ## 📄 License
 
 MIT
+
+### Staff Workspace Isolation
+
+Each job and candidate created by an authenticated owner, admin, or recruiter is assigned to that user's private workspace. Matching, reports, feedback, interviews, CV downloads, and delete/update operations enforce the same ownership boundary. A staff user cannot read, edit, delete, or match another staff user's data.
+
+The candidate-facing job board remains shared so candidates can discover available positions. Candidate self-service data is still restricted to the signed-in candidate. User accounts and role management remain global for owner/admin administration.
+
+Migration `0005_user_data_isolation` assigns existing legacy jobs, candidates, and feedback records to the first staff account during deployment. New API-created records always receive an owner. Render runs Alembic migrations automatically on startup.

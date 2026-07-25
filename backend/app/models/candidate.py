@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import JSON, String, Text, Float
+from sqlalchemy import JSON, Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -10,6 +10,9 @@ class Candidate(Base):
     __tablename__ = "candidates"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True, index=True
+    )
     full_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     email: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)

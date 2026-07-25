@@ -87,7 +87,18 @@ In the Render dashboard for the **Frontend** service (`ai-recruiter-frontend`), 
 ## 📊 Database & Runbook / قاعدة البيانات والتشغيل
 - Schema migrations will run automatically upon startup using Alembic (`alembic upgrade head`).
 - If you need to backfill existing models or run scripts, you can open the Render shell in the backend service and run commands like:
-  `python scripts/backfill_production_readiness.py --dry-run`
+ `python scripts/backfill_production_readiness.py --dry-run`
+
+### Workspace isolation
+
+Migration `0005_user_data_isolation` adds ownership to jobs, candidates, and feedback. Existing legacy rows are assigned to the first staff account during deployment so they are not exposed to every new staff user. New jobs and CV uploads are automatically assigned to the authenticated owner, admin, or recruiter who created them.
+
+After the migration:
+
+- Staff users see only their own jobs, candidates, matches, reports, feedback, and interview records.
+- Cross-user read, update, delete, matching, report, and feedback requests return `404`.
+- Candidates still see the shared job board so they can apply to available positions.
+- Owner/admin user and role administration remains global by design.
 
 - سيتم تشغيل تحديثات قاعدة البيانات (Migrations) تلقائياً عند إقلاع الخدمة باستخدام Alembic.
 - إذا كنت بحاجة لتهيئة النماذج أو تشغيل السكربتات، يمكنك فتح الـ Shell المتاح في Render للخدمة الخلفية وكتابة الأوامر مثل:

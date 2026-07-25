@@ -9,7 +9,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db_session
-from app.core.deps import ensure_candidate_access, require_any_role
+from app.core.deps import ensure_candidate_access, ensure_job_access, owned_resource_clause, require_any_role
 from app.core.config import settings
 from app.models.embedding import Embedding
 from app.models.interview import InterviewSession
@@ -148,6 +148,8 @@ async def _ensure_interview_access(
     """
     interview = await _get_interview_or_404(db_session, session_id)
     await ensure_candidate_access(db_session, current_user, interview.candidate_id)
+    if current_user.role.lower() in STAFF_ROLES:
+        await ensure_job_access(db_session, current_user, interview.job_id)
     return interview
 
 
@@ -289,6 +291,8 @@ async def start_interview(
     Creates an interview session for a candidate and job.
     """
     try:
+        if current_user.role in {"owner", "admin", "recruiter"}:
+            await ensure_job_access(session, current_user, request.job_id)
         await ensure_candidate_access(session, current_user, request.candidate_id)
         interview_service = (
             get_enhanced_interview_service() if use_llm else get_simple_interview_service()
@@ -312,12 +316,14 @@ async def start_interview(
 async def invite_candidate(
     request: StartInterviewRequest,
     session: AsyncSession = Depends(get_db_session),
-    _: User = Depends(require_any_role("owner", "admin", "recruiter")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter")),
 ) -> dict:
     """
     Creates an interview session and sends the invitation email when configured.
     """
     try:
+        await ensure_job_access(session, current_user, request.job_id)
+        await ensure_candidate_access(session, current_user, request.candidate_id)
         interview_service = get_enhanced_interview_service()
         interview, candidate_name, job_title = await interview_service.create_session(
             session, request.job_id, request.candidate_id
@@ -653,18 +659,19 @@ async def _refresh_stale_dashboard_matches(
 
 @router.get("/interviews/dashboard-results", response_model=list[DashboardInterviewResult])
 async def interview_dashboard_results(
-    _: User = Depends(require_any_role("owner", "admin", "recruiter")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter")),
     session: AsyncSession = Depends(get_db_session),
 ) -> list[DashboardInterviewResult]:
     """
     Builds recruiter dashboard rows from interviews, reports, and saved matches.
     """
-    stmt = select(InterviewSession)
+    owned_job_ids = select(Job.id).where(owned_resource_clause(Job, current_user.id))
+    stmt = select(InterviewSession).where(InterviewSession.job_id.in_(owned_job_ids))
     result = await session.execute(stmt)
     interviews = list(result.scalars().all())
-    report_result = await session.execute(select(Report))
+    report_result = await session.execute(select(Report).where(Report.job_id.in_(owned_job_ids)))
     reports = list(report_result.scalars().all())
-    match_result = await session.execute(select(MatchResult))
+    match_result = await session.execute(select(MatchResult).where(MatchResult.job_id.in_(owned_job_ids)))
     saved_matches = list(match_result.scalars().all())
     if not interviews and not reports and not saved_matches:
         return []
@@ -676,7 +683,12 @@ async def interview_dashboard_results(
     job_ids.update(report.job_id for report in reports)
     job_ids.update(match.job_id for match in saved_matches)
 
-    cand_result = await session.execute(select(Candidate).where(Candidate.id.in_(candidate_ids)))
+    cand_result = await session.execute(
+        select(Candidate).where(
+            Candidate.id.in_(candidate_ids),
+            owned_resource_clause(Candidate, current_user.id),
+        )
+    )
     candidates = {candidate.id: candidate for candidate in cand_result.scalars().all()}
 
     job_result = await session.execute(select(Job).where(Job.id.in_(job_ids)))
@@ -883,13 +895,13 @@ async def get_interview_status(
 @router.delete("/interviews/{session_id}")
 async def delete_interview(
     session_id: str,
-    _: User = Depends(require_any_role("owner", "admin", "recruiter")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter")),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, str]:
     """
     Deletes an interview and its dependent match, report, and embedding rows.
     """
-    interview = await _get_interview_or_404(session, session_id)
+    interview = await _ensure_interview_access(session, current_user, session_id)
 
     await session.execute(
         delete(MatchResult).where(

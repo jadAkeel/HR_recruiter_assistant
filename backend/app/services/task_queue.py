@@ -27,6 +27,7 @@ async def enqueue_cv_processing(
     use_llm: bool = True,
     file_path: str | None = None,
     task_id: str | None = None,
+    created_by_user_id: str | None = None,
 ) -> str:
     """
     Queues a CV processing task and returns its task ID.
@@ -38,6 +39,7 @@ async def enqueue_cv_processing(
         "file_name": file_name,
         "use_llm": use_llm,
         "file_path": file_path,
+        "created_by_user_id": created_by_user_id,
         "status": "queued",
     }
     r = await get_redis()
@@ -87,6 +89,7 @@ async def run_cv_worker(process_func: ProcessFunc) -> None:
                             file_name=task["file_name"],
                             use_llm=task.get("use_llm", True),
                             file_path=task.get("file_path"),
+                            created_by_user_id=task.get("created_by_user_id"),
                         )
                         result["task_id"] = task_id
                         result["status"] = "completed"
@@ -116,6 +119,7 @@ async def run_cv_worker(process_func: ProcessFunc) -> None:
                     file_name=task["file_name"],
                     use_llm=task.get("use_llm", True),
                     file_path=task.get("file_path"),
+                    created_by_user_id=task.get("created_by_user_id"),
                 )
                 result["task_id"] = task_id
                 result["status"] = "completed"

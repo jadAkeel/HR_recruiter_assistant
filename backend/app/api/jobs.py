@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import require_any_role
+from app.core.deps import ensure_job_access, owned_resource_clause, require_any_role
 from app.core.db import get_db_session
 from app.core.config import settings
 from app.models.embedding import Embedding
@@ -50,13 +50,15 @@ async def parse_job(
 
 @router.get("/jobs", response_model=list[JobRecord])
 async def list_jobs(
-    _: User = Depends(require_any_role("owner", "admin", "recruiter", "candidate")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter", "candidate")),
     session: AsyncSession = Depends(get_db_session),
 ) -> list[JobRecord]:
     """
     Lists saved jobs as API records.
     """
     stmt = select(Job).order_by(Job.id.desc())
+    if current_user.role.lower() in {"owner", "admin", "recruiter"}:
+        stmt = stmt.where(owned_resource_clause(Job, current_user.id))
     result = await session.execute(stmt)
     jobs = result.scalars().all()
     return [_to_job_record(job) for job in jobs]
@@ -65,7 +67,7 @@ async def list_jobs(
 @router.post("/jobs", response_model=JobRecord)
 async def create_job(
     request: JobParseRequest,
-    _: User = Depends(require_any_role("owner", "admin", "recruiter")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter")),
     session: AsyncSession = Depends(get_db_session),
 ) -> JobRecord:
     """
@@ -106,6 +108,7 @@ async def create_job(
 
         job = Job(
             id=job_id,
+            created_by_user_id=current_user.id,
             title=profile.title,
             description=profile.description,
             required_skills=required_skills,
@@ -139,13 +142,15 @@ async def create_job(
 async def update_job(
     job_id: str,
     request: JobUpdateRequest,
-    _: User = Depends(require_any_role("owner", "admin", "recruiter")),
+    current_user: User | None = Depends(require_any_role("owner", "admin", "recruiter")),
     session: AsyncSession = Depends(get_db_session),
 ) -> JobRecord:
     """
     Updates a job and clears stale match results when matching inputs change.
     """
     stmt = select(Job).where(Job.id == job_id)
+    if current_user is not None:
+        stmt = stmt.where(owned_resource_clause(Job, current_user.id))
     result = await session.execute(stmt)
     job = result.scalar_one_or_none()
     if job is None:
@@ -203,17 +208,13 @@ async def update_job(
 @router.delete("/jobs/{job_id}")
 async def delete_job(
     job_id: str,
-    _: User = Depends(require_any_role("owner", "admin", "recruiter")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter")),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, str]:
     """
     Deletes a job and related matches, interviews, reports, and embeddings.
     """
-    stmt = select(Job).where(Job.id == job_id)
-    result = await session.execute(stmt)
-    job = result.scalar_one_or_none()
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+    job = await ensure_job_access(session, current_user, job_id)
 
     await session.execute(delete(MatchResult).where(MatchResult.job_id == job_id))
     await session.execute(delete(SkillFeedback).where(SkillFeedback.job_id == job_id))

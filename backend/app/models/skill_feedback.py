@@ -13,6 +13,9 @@ class SkillFeedback(Base):
     __tablename__ = "skill_feedback"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True, index=True
+    )
     job_id: Mapped[str] = mapped_column(String(36), ForeignKey("jobs.id"), index=True)
     candidate_id: Mapped[str] = mapped_column(String(36), ForeignKey("candidates.id"), index=True)
     skill_name: Mapped[str] = mapped_column(String(120), index=True)

@@ -140,6 +140,7 @@ async def _cv_worker():
         file_name: str,
         use_llm: bool,
         file_path: str | None = None,
+        created_by_user_id: str | None = None,
     ) -> dict:
         """
         Processes one queued CV upload into a candidate record.
@@ -158,6 +159,8 @@ async def _cv_worker():
 
             if profile.email:
                 stmt = select(Candidate).where(Candidate.email == profile.email)
+                if created_by_user_id:
+                    stmt = stmt.where(Candidate.created_by_user_id == created_by_user_id)
                 result = await session.execute(stmt)
                 existing = result.scalar_one_or_none()
                 if existing:
@@ -190,7 +193,7 @@ async def _cv_worker():
                     }
 
             candidate_id = str(uuid.uuid4())
-            candidate = Candidate(id=candidate_id)
+            candidate = Candidate(id=candidate_id, created_by_user_id=created_by_user_id)
             _apply_profile_to_candidate(candidate, profile)
             session.add(candidate)
             await session.commit()

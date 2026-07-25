@@ -82,6 +82,7 @@ class VectorStore:
         embedding: list[float],
         top_k: int = 5,
         language: str | None = None,
+        entity_ids: set[str] | None = None,
     ) -> list[tuple[str, float]]:
         """
         Finds the most similar stored embeddings for an entity type.
@@ -90,9 +91,9 @@ class VectorStore:
         if np.linalg.norm(np.array(embedding, dtype=np.float32)) == 0:
             return []
         if self.is_postgres:
-            return await self._query_postgres(entity_type, embedding, top_k, language)
+            return await self._query_postgres(entity_type, embedding, top_k, language, entity_ids)
 
-        return await self._query_in_memory(entity_type, embedding, top_k, language)
+        return await self._query_in_memory(entity_type, embedding, top_k, language, entity_ids)
 
     async def _query_postgres(
         self,
@@ -100,6 +101,7 @@ class VectorStore:
         embedding: list[float],
         top_k: int,
         language: str | None = None,
+        entity_ids: set[str] | None = None,
     ) -> list[tuple[str, float]]:
         """
         Queries PostgreSQL pgvector for nearest embeddings.
@@ -112,6 +114,10 @@ class VectorStore:
             select(Embedding.entity_id, Embedding.embedding_vector.cosine_distance(embedding))
             .where(Embedding.entity_type == entity_type)
         )
+        if entity_ids is not None:
+            if not entity_ids:
+                return []
+            stmt = stmt.where(Embedding.entity_id.in_(entity_ids))
         if language:
             stmt = stmt.where(Embedding.embedding_language == language)
             
@@ -129,6 +135,7 @@ class VectorStore:
         embedding: list[float],
         top_k: int,
         language: str | None = None,
+        entity_ids: set[str] | None = None,
     ) -> list[tuple[str, float]]:
         """
         Computes cosine similarity in Python for non-pgvector databases.
@@ -136,6 +143,10 @@ class VectorStore:
         stmt = select(Embedding.entity_id, Embedding.embedding_json).where(
             Embedding.entity_type == entity_type
         )
+        if entity_ids is not None:
+            if not entity_ids:
+                return []
+            stmt = stmt.where(Embedding.entity_id.in_(entity_ids))
         if language:
             stmt = stmt.where(Embedding.embedding_language == language)
         result = await self.session.execute(stmt)

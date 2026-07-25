@@ -4,7 +4,7 @@ import logging
 from collections import Counter
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.candidate import Candidate
@@ -17,14 +17,26 @@ SYNONYM_CONFIRMATION_THRESHOLD = 3
 _ACCEPTED_DYNAMIC_SYNONYMS: set[tuple[str, str]] = set()
 
 
-async def process_feedback_batch(session: AsyncSession, batch_size: int = 50) -> dict[str, Any]:
+async def process_feedback_batch(
+    session: AsyncSession,
+    batch_size: int = 50,
+    owner_user_id: str | None = None,
+) -> dict[str, Any]:
     """
     Analyzes stored feedback and promotes repeated corrections to dynamic synonyms.
     """
-    result = await session.execute(select(SkillFeedback).where(SkillFeedback.correct_match.is_(True)))
+    stmt = select(SkillFeedback).where(SkillFeedback.correct_match.is_(True))
+    if owner_user_id:
+        stmt = stmt.where(
+            or_(
+                SkillFeedback.created_by_user_id == owner_user_id,
+                SkillFeedback.created_by_user_id.is_(None),
+            )
+        )
+    result = await session.execute(stmt)
     feedback_items = list(result.scalars().all())
     if not feedback_items:
-        return await get_feedback_stats(session)
+        return await get_feedback_stats(session, owner_user_id=owner_user_id)
 
     candidate_ids = {item.candidate_id for item in feedback_items}
     candidate_result = await session.execute(select(Candidate).where(Candidate.id.in_(candidate_ids)))
@@ -57,7 +69,7 @@ async def process_feedback_batch(session: AsyncSession, batch_size: int = 50) ->
             accepted += 1
             logger.info("Accepted dynamic skill synonym", extra={"skill_a": pair[0], "skill_b": pair[1], "count": count})
 
-    stats = await get_feedback_stats(session)
+    stats = await get_feedback_stats(session, owner_user_id=owner_user_id)
     stats.update({"synonyms_suggested": suggested, "synonyms_accepted": len(_ACCEPTED_DYNAMIC_SYNONYMS), "new_synonyms_accepted": accepted})
     return stats
 
@@ -81,13 +93,28 @@ def update_synonym_map(skill_a: str, skill_b: str) -> None:
     add_dynamic_synonym(skill_a, skill_b)
 
 
-async def get_feedback_stats(session: AsyncSession) -> dict[str, Any]:
+async def get_feedback_stats(
+    session: AsyncSession,
+    owner_user_id: str | None = None,
+) -> dict[str, Any]:
     """
     Returns aggregate feedback and learning counters.
     """
-    total = await session.scalar(select(func.count()).select_from(SkillFeedback)) or 0
+    base_filter = []
+    if owner_user_id:
+        base_filter.append(
+            or_(
+                SkillFeedback.created_by_user_id == owner_user_id,
+                SkillFeedback.created_by_user_id.is_(None),
+            )
+        )
+    total = await session.scalar(
+        select(func.count()).select_from(SkillFeedback).where(*base_filter)
+    ) or 0
     positive = await session.scalar(
-        select(func.count()).select_from(SkillFeedback).where(SkillFeedback.correct_match.is_(True))
+        select(func.count())
+        .select_from(SkillFeedback)
+        .where(SkillFeedback.correct_match.is_(True), *base_filter)
     ) or 0
     return {
         "total_feedback": int(total),

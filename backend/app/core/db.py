@@ -228,6 +228,12 @@ async def _ensure_embedding_metadata_columns(connection) -> None:
             "is_stale": "BOOLEAN DEFAULT FALSE" if engine.dialect.name == "postgresql" else "INTEGER DEFAULT 0",
         },
     )
+    for table_name in ("jobs", "candidates", "skill_feedback"):
+        await _ensure_table_columns(
+            connection,
+            table_name,
+            {"created_by_user_id": "VARCHAR(36)"},
+        )
 
 
 async def _ensure_table_columns(connection, table_name: str, columns: dict[str, str]) -> None:

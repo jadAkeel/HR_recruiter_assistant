@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import SessionLocal, get_db_session
-from app.core.deps import ensure_candidate_access, get_current_user, require_any_role
+from app.core.deps import ensure_candidate_access, get_current_user, owned_resource_clause, require_any_role
 from app.core.config import settings
 from sqlalchemy import delete as sa_delete
 
@@ -207,6 +207,7 @@ async def _create_candidate_from_content(
     content: bytes,
     use_llm: bool,
     session: AsyncSession,
+    created_by_user_id: str | None = None,
 ) -> CandidateRecord:
     """
     Parses CV content, creates or updates the candidate, and stores its embedding.
@@ -254,6 +255,8 @@ async def _create_candidate_from_content(
     existing_candidate = None
     if profile.email:
         stmt = select(Candidate).where(Candidate.email == profile.email)
+        if created_by_user_id:
+            stmt = stmt.where(Candidate.created_by_user_id == created_by_user_id)
         result = await session.execute(stmt)
         existing_candidate = result.scalar_one_or_none()
 
@@ -282,7 +285,7 @@ async def _create_candidate_from_content(
         )
 
     candidate_id = str(uuid.uuid4())
-    candidate = Candidate(id=candidate_id)
+    candidate = Candidate(id=candidate_id, created_by_user_id=created_by_user_id)
     _apply_profile_to_candidate(candidate, profile)
     session.add(candidate)
     await session.commit()
@@ -306,6 +309,7 @@ async def _create_candidate_from_upload(
     file: UploadFile,
     use_llm: bool,
     session: AsyncSession,
+    created_by_user_id: str | None = None,
 ) -> CandidateRecord:
     """
     Reads an uploaded CV and creates or updates the candidate record.
@@ -316,6 +320,7 @@ async def _create_candidate_from_upload(
         content=content,
         use_llm=use_llm,
         session=session,
+        created_by_user_id=created_by_user_id,
     )
 
 
@@ -346,14 +351,19 @@ async def create_candidate(
         default=True,
         description="Use LLM (Ollama) for enhanced CV parsing (negation detection, skill levels)",
     ),
-    _: User = Depends(require_any_role("owner", "admin", "recruiter", "candidate")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter", "candidate")),
     session: AsyncSession = Depends(get_db_session),
 ) -> CandidateRecord:
     """
     Handles a synchronous candidate CV upload.
     """
     try:
-        return await _create_candidate_from_upload(file=file, use_llm=use_llm, session=session)
+        return await _create_candidate_from_upload(
+            file=file,
+            use_llm=use_llm,
+            session=session,
+            created_by_user_id=current_user.id,
+        )
     except ValueError as exc:
         logger.warning("Unsupported CV file", extra={"cv_filename": file.filename})
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -366,7 +376,7 @@ async def create_candidate(
 async def create_candidate_async(
     file: UploadFile = File(...),
     use_llm: bool = Query(default=True),
-    _: User = Depends(require_any_role("owner", "admin", "recruiter", "candidate")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter", "candidate")),
 ) -> dict[str, str]:
     """
     Queues a candidate CV upload for background processing.
@@ -381,6 +391,7 @@ async def create_candidate_async(
             use_llm=use_llm,
             file_path=file_path,
             task_id=task_id,
+            created_by_user_id=current_user.id,
         )
         return {"task_id": task_id, "status": "queued"}
     except ValueError as exc:
@@ -417,7 +428,7 @@ async def list_candidates(
     sort_dir: str | None = Query(default="desc", description="Sort direction: asc or desc"),
     limit: int = Query(default=200, ge=1, le=1000, description="Maximum candidates to return"),
     offset: int = Query(default=0, ge=0, description="Number of candidates to skip after filtering"),
-    _: User = Depends(require_any_role("owner", "admin", "recruiter")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter")),
     session: AsyncSession = Depends(get_db_session),
 ) -> list[CandidateRecord]:
     """
@@ -436,7 +447,7 @@ async def list_candidates(
     if min_years is not None and max_years is not None and min_years > max_years:
         raise HTTPException(status_code=400, detail="min_years cannot exceed max_years")
 
-    stmt = select(Candidate)
+    stmt = select(Candidate).where(owned_resource_clause(Candidate, current_user.id))
     if search:
         search_lower = search.lower()
         stmt = stmt.where(
@@ -567,7 +578,9 @@ async def get_my_candidate_profile(
     """
     Returns the candidate profile linked to the current user email.
     """
-    stmt = select(Candidate).where(Candidate.email == current_user.email)
+    stmt = select(Candidate).where(
+        (Candidate.created_by_user_id == current_user.id) | (Candidate.email == current_user.email)
+    )
     result = await session.execute(stmt)
     candidate = result.scalars().first()
     if candidate is None:
@@ -675,12 +688,13 @@ async def preview_cv(
 @router.delete("/candidates/{candidate_id}")
 async def delete_candidate(
     candidate_id: str,
-    _: User = Depends(require_any_role("owner", "admin", "recruiter")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter")),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, str]:
     """
     Deletes a candidate and all dependent records.
     """
+    await ensure_candidate_access(session, current_user, candidate_id)
     stmt = select(Candidate).where(Candidate.id == candidate_id)
     result = await session.execute(stmt)
     candidate = result.scalar_one_or_none()
@@ -710,13 +724,13 @@ async def delete_candidate(
 
 @router.delete("/candidates")
 async def delete_all_candidates(
-    _: User = Depends(require_any_role("owner", "admin")),
+    current_user: User = Depends(require_any_role("owner", "admin")),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, str | int]:
     """
     Deletes all candidates and their dependent records.
     """
-    cand_stmt = select(Candidate)
+    cand_stmt = select(Candidate).where(owned_resource_clause(Candidate, current_user.id))
     cand_result = await session.execute(cand_stmt)
     candidates = cand_result.scalars().all()
 
@@ -728,7 +742,12 @@ async def delete_all_candidates(
         await session.execute(sa_delete(ReportVersion).where(ReportVersion.candidate_id.in_(candidate_ids)))
         await session.execute(sa_delete(Report).where(Report.candidate_id.in_(candidate_ids)))
         await session.execute(sa_delete(InterviewSession).where(InterviewSession.candidate_id.in_(candidate_ids)))
-    await session.execute(sa_delete(Embedding).where(Embedding.entity_type == "candidate"))
+        await session.execute(
+            sa_delete(Embedding).where(
+                Embedding.entity_type == "candidate",
+                Embedding.entity_id.in_(candidate_ids),
+            )
+        )
 
     for candidate in candidates:
         _delete_cv_files(candidate.id)
@@ -745,7 +764,7 @@ async def delete_all_candidates(
 async def stream_candidates(
     files: list[UploadFile] = File(...),
     use_llm: bool = Query(default=True, description="Use LLM (Ollama) for enhanced CV parsing"),
-    _: User = Depends(require_any_role("owner", "admin", "recruiter")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter")),
 ) -> StreamingResponse:
     """
     Streams results while uploading and parsing multiple CV files.
@@ -772,6 +791,7 @@ async def stream_candidates(
                         content=content,
                         use_llm=use_llm,
                         session=stream_session,
+                        created_by_user_id=current_user.id,
                     )
                 payload = {
                     "filename": filename,

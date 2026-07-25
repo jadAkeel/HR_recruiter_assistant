@@ -147,7 +147,12 @@ async def _fallback_semantic_similarity(
 
     embedder = get_embedding_service()
     job_emb = (await embedder.embed([job.description]))[0]
-    similar = await store.query_similar("candidate", job_emb, top_k=top_k)
+    similar = await store.query_similar(
+        "candidate",
+        job_emb,
+        top_k=top_k,
+        entity_ids={candidate.id},
+    )
     vector_score = next((s for cid, s in similar if cid == candidate.id), 0.0)
     return max(vector_score, project_bonus)
 
@@ -628,7 +633,12 @@ async def compare_candidates(
         embedder = get_embedding_service()
         store = VectorStore(session)
         job_emb = (await embedder.embed([job.description]))[0]
-        similar = await store.query_similar("candidate", job_emb, top_k=50)
+        similar = await store.query_similar(
+            "candidate",
+            job_emb,
+            top_k=50,
+            entity_ids=set(candidate_ids),
+        )
         sim_map = dict(similar)
 
     if not candidate_ids:

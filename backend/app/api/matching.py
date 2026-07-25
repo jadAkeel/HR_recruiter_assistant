@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db_session
-from app.core.deps import require_any_role
+from app.core.deps import ensure_job_access, owned_resource_clause, require_any_role
 from app.core.config import settings
 from app.models.candidate import Candidate
 from app.models.job import Job
@@ -44,7 +44,7 @@ async def match_candidates(
     degree: str | None = Query(default=None, description="Filter by degree name"),
     cross_encoder_top_k: int = Query(default=0, ge=0, le=50, description="Number of candidates sent to LLM cross-encoder for bounded advisory reranking (0 to disable)"),
     use_hybrid: bool = Query(default=True, description="Use hybrid matching engine with ESCO integration"),
-    _: User = Depends(require_any_role("owner", "admin", "recruiter")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter")),
     session: AsyncSession = Depends(get_db_session),
 ) -> MatchResponse:
     """
@@ -53,7 +53,7 @@ async def match_candidates(
     if skill_logic not in {"and", "or"}:
         raise HTTPException(status_code=400, detail="skill_logic must be 'and' or 'or'")
 
-    job = await _get_job(session, job_id)
+    job = await ensure_job_access(session, current_user, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -68,6 +68,7 @@ async def match_candidates(
         education_search=education_search,
         university=university,
         degree=degree,
+        user_id=current_user.id,
     )
 
     # Only compute job embedding if not using hybrid engine (hybrid computes its own)
@@ -90,7 +91,7 @@ async def match_candidates(
         cross_encoder_top_k=cross_encoder_top_k,
         use_hybrid=use_hybrid,
     )
-    results = await _serialize_matches(session, matches)
+    results = await _serialize_matches(session, matches, user_id=current_user.id)
 
     return MatchResponse(job_id=job_id, results=results)
 
@@ -99,32 +100,37 @@ async def match_candidates(
 async def saved_matches(
     job_id: str,
     top_k: int = Query(default=100, ge=1, le=100, description="Number of saved candidates to return"),
-    _: User = Depends(require_any_role("owner", "admin", "recruiter")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter")),
     session: AsyncSession = Depends(get_db_session),
 ) -> MatchResponse:
     """
     Returns saved matches for a job and refreshes stale score traces.
     """
-    job = await _get_job(session, job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+    job = await ensure_job_access(session, current_user, job_id)
 
     result = await session.execute(
         select(MatchResult)
+        .join(Candidate, Candidate.id == MatchResult.candidate_id)
         .where(MatchResult.job_id == job_id)
+        .where(owned_resource_clause(Candidate, current_user.id))
         .order_by(MatchResult.score.desc(), MatchResult.candidate_id.asc())
         .limit(top_k)
     )
     matches = list(result.scalars().all())
     matches = await _refresh_stale_saved_matches(session, job, matches)
-    return MatchResponse(job_id=job_id, results=await _serialize_matches(session, matches))
+    return MatchResponse(
+        job_id=job_id,
+        results=await _serialize_matches(session, matches, user_id=current_user.id),
+    )
 
 
-async def _get_job(session: AsyncSession, job_id: str) -> Job | None:
+async def _get_job(session: AsyncSession, job_id: str, user_id: str | None = None) -> Job | None:
     """
     Loads one job by ID from the database.
     """
     stmt = select(Job).where(Job.id == job_id)
+    if user_id:
+        stmt = stmt.where(owned_resource_clause(Job, user_id))
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -140,6 +146,7 @@ async def _filter_candidates(
     education_search: str | None = None,
     university: str | None = None,
     degree: str | None = None,
+    user_id: str | None = None,
 ) -> list[Candidate]:
     """
     Applies candidate search and filter options before matching.
@@ -154,6 +161,8 @@ async def _filter_candidates(
         raise HTTPException(status_code=400, detail="min_years cannot exceed max_years")
 
     stmt = select(Candidate)
+    if user_id:
+        stmt = stmt.where(owned_resource_clause(Candidate, user_id))
 
     if search:
         search_lower = search.lower()
@@ -219,14 +228,21 @@ async def _filter_candidates(
     return candidates
 
 
-async def _serialize_matches(session: AsyncSession, matches: list[MatchResult]) -> list[MatchItem]:
+async def _serialize_matches(
+    session: AsyncSession,
+    matches: list[MatchResult],
+    user_id: str | None = None,
+) -> list[MatchItem]:
     """
     Converts saved match rows into API response items.
     """
     candidate_ids = {match.candidate_id for match in matches}
     candidate_by_id: dict[str, Candidate] = {}
     if candidate_ids:
-        result = await session.execute(select(Candidate).where(Candidate.id.in_(candidate_ids)))
+        stmt = select(Candidate).where(Candidate.id.in_(candidate_ids))
+        if user_id:
+            stmt = stmt.where(owned_resource_clause(Candidate, user_id))
+        result = await session.execute(stmt)
         candidate_by_id = {candidate.id: candidate for candidate in result.scalars().all()}
 
     return [

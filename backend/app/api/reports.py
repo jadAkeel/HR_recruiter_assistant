@@ -7,7 +7,7 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db_session
-from app.core.deps import ensure_candidate_access, require_any_role
+from app.core.deps import ensure_candidate_access, ensure_job_access, require_any_role
 from app.models.match_result import MatchResult
 from app.models.report import Report
 from app.models.report_version import ReportVersion
@@ -39,6 +39,8 @@ async def report_candidate(
     """
     try:
         await ensure_candidate_access(session, current_user, request.candidate_id)
+        if current_user.role.lower() in {"owner", "admin", "recruiter"}:
+            await ensure_job_access(session, current_user, request.job_id)
         return await generate_candidate_report(
             session,
             request.job_id,
@@ -52,13 +54,16 @@ async def report_candidate(
 @router.post("/reports/compare", response_model=ComparisonResponse)
 async def report_compare(
     request: ComparisonRequest,
-    _: User = Depends(require_any_role("owner", "admin", "recruiter")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter")),
     session: AsyncSession = Depends(get_db_session),
 ) -> ComparisonResponse:
     """
     Compares selected candidates for one job.
     """
     try:
+        await ensure_job_access(session, current_user, request.job_id)
+        for candidate_id in request.candidate_ids:
+            await ensure_candidate_access(session, current_user, candidate_id)
         return await compare_candidates(session, request.job_id, request.candidate_ids)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -68,12 +73,14 @@ async def report_compare(
 async def delete_report_candidate(
     job_id: str = Query(...),
     candidate_id: str = Query(...),
-    _: User = Depends(require_any_role("owner", "admin", "recruiter")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter")),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, str]:
     """
     Deletes a saved candidate report.
     """
+    await ensure_job_access(session, current_user, job_id)
+    await ensure_candidate_access(session, current_user, candidate_id)
     await session.execute(
         delete(ReportVersion).where(
             ReportVersion.job_id == job_id,
