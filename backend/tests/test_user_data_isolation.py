@@ -5,6 +5,7 @@ import uuid
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app.api.candidates import _delete_cv_files
 from app.core.db import SessionLocal
 from app.main import create_app
 from app.models.user import User
@@ -76,6 +77,15 @@ def test_staff_data_is_isolated_by_owner() -> None:
         assert candidate_b.status_code == 200, candidate_b.text
         candidate_a_id = candidate_a.json()["candidate_id"]
         candidate_b_id = candidate_b.json()["candidate_id"]
+
+        _delete_cv_files(candidate_a_id)
+        downloaded_cv = client.get(
+            f"/api/v1/candidates/{candidate_a_id}/cv?download=true",
+            headers=owner_a,
+        )
+        assert downloaded_cv.status_code == 200
+        assert downloaded_cv.content == cv_bytes
+        assert "attachment;" in downloaded_cv.headers["content-disposition"]
 
         jobs_a = {row["job_id"] for row in client.get("/api/v1/jobs", headers=owner_a).json()}
         jobs_b = {row["job_id"] for row in client.get("/api/v1/jobs", headers=owner_b).json()}

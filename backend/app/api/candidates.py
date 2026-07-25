@@ -6,9 +6,10 @@ import uuid
 import re
 from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
-from fastapi.responses import StreamingResponse, PlainTextResponse, FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import undefer
 
 from app.core.db import SessionLocal, get_db_session
 from app.core.deps import ensure_candidate_access, get_current_user, owned_resource_clause, require_any_role
@@ -75,10 +76,13 @@ def _validate_cv_filename(filename: str | None) -> str:
     """
     Validates a CV filename and returns a safe fallback name.
     """
-    safe_name = filename or "cv.txt"
+    safe_name = Path(filename or "cv.txt").name or "cv.txt"
     ext = Path(safe_name).suffix.lower()
     if ext not in ALLOWED_CV_EXTENSIONS:
         raise ValueError("Unsupported CV file type. Allowed types: PDF, DOCX, TXT.")
+    if len(safe_name) > 255:
+        stem = Path(safe_name).stem[: 255 - len(ext)]
+        safe_name = f"{stem}{ext}"
     return safe_name
 
 
@@ -266,6 +270,8 @@ async def _create_candidate_from_content(
             extra={"email": profile.email, "candidate_id": existing_candidate.id},
         )
         _apply_profile_to_candidate(existing_candidate, profile)
+        existing_candidate.cv_file_name = filename
+        existing_candidate.cv_content = content
         await session.commit()
         _delete_cv_files(existing_candidate.id)
         _save_cv_file(existing_candidate.id, filename, content)
@@ -285,7 +291,12 @@ async def _create_candidate_from_content(
         )
 
     candidate_id = str(uuid.uuid4())
-    candidate = Candidate(id=candidate_id, created_by_user_id=created_by_user_id)
+    candidate = Candidate(
+        id=candidate_id,
+        created_by_user_id=created_by_user_id,
+        cv_file_name=filename,
+        cv_content=content,
+    )
     _apply_profile_to_candidate(candidate, profile)
     session.add(candidate)
     await session.commit()
@@ -650,18 +661,38 @@ async def preview_cv(
     download: bool = Query(default=False, description="Download the original CV file"),
     current_user: User = Depends(require_any_role("owner", "admin", "recruiter", "candidate")),
     session: AsyncSession = Depends(get_db_session),
-) -> PlainTextResponse | FileResponse:
+) -> PlainTextResponse | FileResponse | Response:
     """
     Returns extracted CV text or the stored CV file for download.
     """
     await ensure_candidate_access(session, current_user, candidate_id)
-    stmt = select(Candidate).where(Candidate.id == candidate_id)
+    stmt = (
+        select(Candidate)
+        .options(undefer(Candidate.cv_content))
+        .where(Candidate.id == candidate_id)
+    )
     result = await session.execute(stmt)
     candidate = result.scalar_one_or_none()
     if candidate is None:
         raise HTTPException(status_code=404, detail="Candidate not found")
 
     file_path = _get_cv_file_path(candidate_id)
+    if download and candidate.cv_content:
+        media_type_map = {
+            ".pdf": "application/pdf",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".txt": "text/plain",
+        }
+        ext = Path(candidate.cv_file_name or "").suffix.lower()
+        if ext not in media_type_map:
+            ext = ".pdf"
+        name = _safe_download_name(candidate.full_name, ext)
+        return Response(
+            content=candidate.cv_content,
+            media_type=media_type_map.get(ext, "application/octet-stream"),
+            headers={"Content-Disposition": f'attachment; filename="{name}"'},
+        )
+
     if download and file_path:
         media_type_map = {
             ".pdf": "application/pdf",

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
-import api from '../api/client';
+import api, { warmApi } from '../api/client';
 import { AuthContext } from './auth';
 import type { User } from './auth';
 
@@ -19,6 +19,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    void warmApi().catch(() => {
+      // Login and registration surface connection errors if warm-up still fails.
+    });
+  }, []);
+
+  useEffect(() => {
     const token = localStorage.getItem('access_token');
     if (!token) return;
 
@@ -35,6 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string) => {
+    await warmApi();
     const { data } = await api.post('/auth/login', { email, password });
     localStorage.setItem('access_token', data.access_token);
     localStorage.setItem('refresh_token', data.refresh_token);

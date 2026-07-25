@@ -5,18 +5,22 @@ import { useAuth } from '../context/auth';
 export default function Register() {
   const [form, setForm] = useState({ email: '', password: '', full_name: '' });
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const { register } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSubmitting(true);
     try {
       const me = await register(form.email, form.password, form.full_name);
       navigate(me.role === 'candidate' ? '/jobs' : '/dashboard');
     } catch (err) {
       const apiError = err as { response?: { data?: { detail?: string } } };
       setError(apiError.response?.data?.detail || 'Registration failed');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -41,8 +45,9 @@ export default function Register() {
             <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
           </div>
-          <button type="submit" className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
-            Register
+          <button type="submit" disabled={submitting}
+            className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">
+            {submitting ? 'Connecting...' : 'Register'}
           </button>
         </form>
         <p className="mt-6 text-center text-sm text-gray-500">

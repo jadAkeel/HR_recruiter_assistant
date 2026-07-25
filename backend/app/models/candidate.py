@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import JSON, Float, ForeignKey, String, Text
+from sqlalchemy import JSON, Float, ForeignKey, LargeBinary, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -28,3 +28,5 @@ class Candidate(Base):
     uncatalogued_skills: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     total_years_experience: Mapped[float | None] = mapped_column(Float, nullable=True)
     raw_text: Mapped[str] = mapped_column(Text)
+    cv_file_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cv_content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)

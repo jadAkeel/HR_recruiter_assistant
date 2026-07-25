@@ -1,26 +1,33 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/auth';
+import { getApiErrorMessage, getApiStatus } from '../utils/errors';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSubmitting(true);
     try {
       const me = await login(email, password);
       navigate(me.role === 'candidate' ? '/jobs' : '/dashboard');
     } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'response' in err) {
+      if (getApiStatus(err) === 401) {
         setError('Invalid email or password');
+      } else if (getApiStatus(err)) {
+        setError(getApiErrorMessage(err, 'The server is temporarily unavailable. Please try again.'));
       } else {
         setError('Cannot connect to server. Make sure the backend is running.');
       }
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -40,8 +47,9 @@ export default function Login() {
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
           </div>
-          <button type="submit" className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
-            Sign In
+          <button type="submit" disabled={submitting}
+            className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">
+            {submitting ? 'Connecting...' : 'Sign In'}
           </button>
         </form>
         <p className="mt-6 text-center text-sm text-gray-500">

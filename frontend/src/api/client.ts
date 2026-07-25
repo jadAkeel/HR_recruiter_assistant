@@ -12,11 +12,45 @@ const getApiBaseUrl = () => {
 };
 const API_BASE_URL = getApiBaseUrl();
 let refreshPromise: Promise<string> | null = null;
+let warmupPromise: Promise<void> | null = null;
+let lastWarmupAt = 0;
 
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 60_000,
 });
+
+export function warmApi(): Promise<void> {
+  if (Date.now() - lastWarmupAt < 60_000) {
+    return Promise.resolve();
+  }
+  if (warmupPromise) return warmupPromise;
+
+  warmupPromise = (async () => {
+    const deadline = Date.now() + 90_000;
+    let lastError: unknown = new Error('Backend warm-up timed out');
+
+    while (Date.now() < deadline) {
+      try {
+        const { data } = await axios.get(`${API_BASE_URL}/health`, { timeout: 15_000 });
+        if (data?.status === 'ok') {
+          lastWarmupAt = Date.now();
+          return;
+        }
+        lastError = new Error('Backend health check returned an unexpected response');
+      } catch (error) {
+        lastError = error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+    }
+
+    throw lastError;
+  })().finally(() => {
+    warmupPromise = null;
+  });
+
+  return warmupPromise;
+}
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('access_token');

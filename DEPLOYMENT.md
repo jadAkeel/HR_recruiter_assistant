@@ -61,7 +61,9 @@ Once the services are deployed, make sure to configure the following environment
 4. **Keep-alive for Render Free**:
    - `KEEP_ALIVE_ENABLED=true` and `KEEP_ALIVE_INTERVAL_SECONDS=270` are configured in `render.yaml`.
    - The backend pings its public `/api/v1/health` endpoint every 4.5 minutes using `RENDER_EXTERNAL_HOSTNAME`.
+   - `.github/workflows/render-keep-alive.yml` also pings the endpoint externally every 5 minutes, so a stopped instance can be woken from outside the service.
    - Set `KEEP_ALIVE_URL` only if you want to override the auto-detected Render URL.
+   - GitHub Actions schedules can occasionally start late. For guaranteed always-on hosting, use a paid Render web-service instance.
 
 5. **Owner/admin bootstrap**:
    - `FIRST_USER_OWNER_ENABLED=true` is configured in `render.yaml`, so the first registered account on an empty database becomes `owner`.
@@ -92,6 +94,8 @@ In the Render dashboard for the **Frontend** service (`ai-recruiter-frontend`), 
 ### Workspace isolation
 
 Migration `0005_user_data_isolation` adds ownership to jobs, candidates, and feedback. Existing legacy rows are assigned to the first staff account during deployment so they are not exposed to every new staff user. New jobs and CV uploads are automatically assigned to the authenticated owner, admin, or recruiter who created them.
+
+The current demo uses a Free Render Postgres database named `ai-recruiter-db`. Free Render Postgres databases expire after 30 days; this instance expires on **August 24, 2026** unless upgraded or replaced. The web service must use its internal URL through `DATABASE_URL`. Migration `0006_cv_binary_storage` stores uploaded CV bytes in Postgres so downloads survive web-service restarts. Those files count against the free database's 1GB storage limit.
 
 After the migration:
 

@@ -51,12 +51,16 @@ async def _keep_alive_worker() -> None:
         return
 
     interval = max(settings.keep_alive_interval_seconds, 60.0)
+    logger.info("Keep-alive scheduled every %.0f seconds via %s", interval, url)
     await asyncio.sleep(interval)
     async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
         while True:
             try:
                 response = await client.get(url)
-                logger.debug("Keep-alive ping returned %s from %s", response.status_code, url)
+                if response.is_success:
+                    logger.debug("Keep-alive ping returned %s from %s", response.status_code, url)
+                else:
+                    logger.warning("Keep-alive ping returned %s from %s", response.status_code, url)
             except Exception:
                 logger.warning("Keep-alive ping failed for %s", url, exc_info=True)
             await asyncio.sleep(interval)
@@ -165,6 +169,9 @@ async def _cv_worker():
                 existing = result.scalar_one_or_none()
                 if existing:
                     _apply_profile_to_candidate(existing, profile)
+                    if content is not None:
+                        existing.cv_file_name = file_name
+                        existing.cv_content = content
                     await session.commit()
                     await replace_candidate_skill_evidence(session, existing, commit=True)
                     if content is not None:
@@ -193,7 +200,12 @@ async def _cv_worker():
                     }
 
             candidate_id = str(uuid.uuid4())
-            candidate = Candidate(id=candidate_id, created_by_user_id=created_by_user_id)
+            candidate = Candidate(
+                id=candidate_id,
+                created_by_user_id=created_by_user_id,
+                cv_file_name=file_name if content is not None else None,
+                cv_content=content,
+            )
             _apply_profile_to_candidate(candidate, profile)
             session.add(candidate)
             await session.commit()
