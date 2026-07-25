@@ -3,7 +3,6 @@ import api from '../../api/client';
 import { Upload, CheckCircle, XCircle, Loader, FileText } from 'lucide-react';
 import { getApiErrorMessage, getApiStatus } from '../../utils/errors';
 
-const MAX_CONCURRENT_UPLOADS = 3;
 const MAX_NETWORK_RETRIES = 3;
 
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -39,35 +38,47 @@ export default function BulkUpload() {
     }
   };
 
-  const pollTask = async (taskId: string) => {
+  const pollTasks = async (tasks: Array<{ task_id: string; filename: string }>) => {
+    const pending = new Map(tasks.map((task) => [task.task_id, task.filename]));
     for (let attempt = 0; attempt < 180; attempt += 1) {
-      const { data } = await withNetworkRetry(() => api.get(`/candidates/async/${taskId}`));
-      if (data.status === 'completed' || data.status === 'failed') return data;
+      const taskIds = Array.from(pending.keys());
+      if (taskIds.length === 0) return;
+
+      const { data } = await withNetworkRetry(() => api.get<Record<string, {
+        status: string;
+        full_name?: string;
+        error?: string;
+      }>>('/candidates/async/bulk', {
+        params: { task_ids: taskIds },
+        paramsSerializer: () => taskIds.map((taskId) => `task_ids=${encodeURIComponent(taskId)}`).join('&'),
+        timeout: 30_000,
+      }));
+
+      for (const [taskId, filename] of pending) {
+        const result = data[taskId];
+        if (!result || result.status === 'pending') continue;
+        if (result.status === 'failed') {
+          setResults((prev) => ({
+            ...prev,
+            [filename]: { status: 'fail', error: result.error || 'Processing failed' },
+          }));
+        } else if (result.status === 'completed') {
+          setResults((prev) => ({
+            ...prev,
+            [filename]: { status: 'ok', name: result.full_name || 'Unknown' },
+          }));
+        } else {
+          continue;
+        }
+        pending.delete(taskId);
+      }
+
       await sleep(2000);
     }
-    throw new Error('Processing timed out');
-  };
-
-  const uploadOne = async (file: File) => {
-    setResults((prev) => ({ ...prev, [file.name]: { status: 'uploading' } }));
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const { data } = await withNetworkRetry(() => api.post('/candidates/async', formData));
-      setResults((prev) => ({ ...prev, [file.name]: { status: 'queued' } }));
-
-      const result = await pollTask(data.task_id);
-      if (result.status === 'failed') {
-        throw new Error(result.error || 'Processing failed');
-      }
+    for (const filename of pending.values()) {
       setResults((prev) => ({
         ...prev,
-        [file.name]: { status: 'ok', name: result.full_name || 'Unknown' },
-      }));
-    } catch (err: unknown) {
-      setResults((prev) => ({
-        ...prev,
-        [file.name]: { status: 'fail', error: getApiErrorMessage(err, 'Error') },
+        [filename]: { status: 'fail', error: 'Processing timed out' },
       }));
     }
   };
@@ -75,18 +86,44 @@ export default function BulkUpload() {
   const uploadAll = async () => {
     if (files.length === 0) return;
     setUploading(true);
-    setResults({});
-    let nextIndex = 0;
-    const worker = async () => {
-      while (nextIndex < files.length) {
-        const file = files[nextIndex];
-        nextIndex += 1;
-        await uploadOne(file);
+    setResults(Object.fromEntries(files.map((file) => [file.name, { status: 'uploading' }])));
+    try {
+      const formData = new FormData();
+      files.forEach((file) => formData.append('files', file, file.name));
+      const { data } = await withNetworkRetry(() => api.post('/candidates/async/bulk', formData, {
+        params: { use_llm: true },
+        timeout: 120_000,
+      }));
+      const queuedTasks: Array<{ task_id: string; filename: string }> = [];
+      for (const task of data.tasks as Array<{
+        task_id?: string;
+        filename: string;
+        status: string;
+        error?: string;
+      }>) {
+        if (task.status === 'queued' && task.task_id) {
+          queuedTasks.push({ task_id: task.task_id, filename: task.filename });
+          setResults((prev) => ({ ...prev, [task.filename]: { status: 'queued' } }));
+        } else {
+          setResults((prev) => ({
+            ...prev,
+            [task.filename]: { status: 'fail', error: task.error || 'Upload failed' },
+          }));
+        }
       }
-    };
-    const workerCount = Math.min(MAX_CONCURRENT_UPLOADS, files.length);
-    await Promise.all(Array.from({ length: workerCount }, worker));
-    setUploading(false);
+      await pollTasks(queuedTasks);
+    } catch (err: unknown) {
+      const message = getApiErrorMessage(err, 'Bulk upload failed');
+      setResults((prev) => Object.fromEntries(
+        Object.entries(prev).map(([filename, result]) => (
+          result.status === 'ok' || result.status === 'fail'
+            ? [filename, result]
+            : [filename, { status: 'fail', error: message }]
+        )),
+      ));
+    } finally {
+      setUploading(false);
+    }
   };
 
   const done = Object.values(results).filter((r) => r.status === 'ok').length;
@@ -158,8 +195,8 @@ export default function BulkUpload() {
                   {res?.status === 'ok' && (
                     <p className="text-xs text-green-600">{res.name}</p>
                   )}
-                  {res?.status === 'queued' && (
-                    <p className="text-xs text-blue-500">Queued</p>
+                  {(res?.status === 'uploading' || res?.status === 'queued') && (
+                    <p className="text-xs text-blue-500">{res.status === 'uploading' ? 'Uploading...' : 'Queued'}</p>
                   )}
                   {res?.status === 'fail' && (
                     <p className="text-xs text-red-500">{res.error}</p>

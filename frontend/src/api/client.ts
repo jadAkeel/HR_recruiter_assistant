@@ -10,7 +10,7 @@ const getApiBaseUrl = () => {
   }
   return url;
 };
-const API_BASE_URL = getApiBaseUrl();
+export const API_BASE_URL = getApiBaseUrl();
 let refreshPromise: Promise<string> | null = null;
 let warmupPromise: Promise<void> | null = null;
 let lastWarmupAt = 0;

@@ -64,6 +64,24 @@ async def get_task_result(task_id: str) -> dict[str, Any] | None:
     return _in_memory_results.get(task_id)
 
 
+async def get_task_results(task_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """
+    Returns several CV task results in one backend request.
+    """
+    r = await get_redis()
+    if r:
+        keys = [f"{TASK_RESULT_PREFIX}{task_id}" for task_id in task_ids]
+        values = await r.mget(*keys)
+        return {
+            task_id: json.loads(value) if value else {"task_id": task_id, "status": "pending"}
+            for task_id, value in zip(task_ids, values)
+        }
+    return {
+        task_id: _in_memory_results.get(task_id, {"task_id": task_id, "status": "pending"})
+        for task_id in task_ids
+    }
+
+
 async def run_cv_worker(process_func: ProcessFunc) -> None:
     """
     Continuously processes queued CV tasks with the provided handler.

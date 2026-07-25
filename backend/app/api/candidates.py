@@ -4,6 +4,7 @@ import logging
 import json
 import uuid
 import re
+from typing import Any
 from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
 from fastapi.responses import FileResponse, PlainTextResponse, Response, StreamingResponse
@@ -38,7 +39,7 @@ from app.services.skill_catalog import (
     skill_in_text,
 )
 from app.services.skill_evidence import replace_candidate_skill_evidence
-from app.services.task_queue import enqueue_cv_processing
+from app.services.task_queue import enqueue_cv_processing, get_task_results
 
 logger = logging.getLogger(__name__)
 
@@ -407,6 +408,55 @@ async def create_candidate_async(
         return {"task_id": task_id, "status": "queued"}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/candidates/async/bulk")
+async def create_candidates_async_bulk(
+    files: list[UploadFile] = File(...),
+    use_llm: bool = Query(default=True),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter")),
+) -> dict[str, object]:
+    """
+    Accepts a complete bulk upload in one request and queues each CV.
+
+    Keeping the upload as one multipart request avoids opening one HTTP
+    connection per CV while preserving background processing and progress
+    reporting through the task IDs returned below.
+    """
+    tasks: list[dict[str, str]] = []
+    for file in files:
+        filename = file.filename or "cv.txt"
+        try:
+            content = await _read_upload_content(file)
+            task_id = str(uuid.uuid4())
+            file_path = _save_pending_cv_file(task_id, filename, content)
+            await enqueue_cv_processing(
+                cv_text=None,
+                file_name=filename,
+                use_llm=use_llm,
+                file_path=file_path,
+                task_id=task_id,
+                created_by_user_id=current_user.id,
+            )
+            tasks.append({"task_id": task_id, "filename": filename, "status": "queued"})
+        except (ValueError, RuntimeError) as exc:
+            logger.warning("Bulk CV upload rejected", extra={"cv_filename": filename, "error": str(exc)})
+            tasks.append({"filename": filename, "status": "failed", "error": str(exc)})
+
+    return {"status": "queued", "tasks": tasks}
+
+
+@router.get("/candidates/async/bulk")
+async def get_async_results_bulk(
+    task_ids: list[str] = Query(...),
+    _: User = Depends(require_any_role("owner", "admin", "recruiter")),
+) -> dict[str, dict[str, Any]]:
+    """
+    Returns the status of many queued CV tasks in one request.
+    """
+    if not task_ids or len(task_ids) > 500:
+        raise HTTPException(status_code=400, detail="Provide between 1 and 500 task IDs")
+    return await get_task_results(task_ids)
 
 
 @router.get("/candidates/async/{task_id}")

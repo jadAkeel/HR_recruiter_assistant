@@ -303,6 +303,73 @@ def test_stream_candidates_parses_uploaded_text_cv() -> None:
     assert "python" in lines[0]["candidate"]["skills"]
 
 
+def test_bulk_async_upload_queues_all_files_in_one_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Checks that a bulk upload returns one task per file without opening one
+    request per CV.
+    """
+    async def _seed_owner() -> tuple[str, str]:
+        await init_db()
+        email = f"bulk-owner-{uuid.uuid4().hex[:8]}@example.com"
+        password = "password123"
+        async with SessionLocal() as session:
+            session.add(User(
+                id=str(uuid.uuid4()),
+                email=email,
+                password_hash=hash_password(password),
+                full_name="Bulk Owner",
+                role="owner",
+            ))
+            await session.commit()
+        return email, password
+
+    queued: list[str] = []
+
+    async def _fake_enqueue_cv_processing(**kwargs):
+        task_id = kwargs["task_id"]
+        queued.append(task_id)
+        return task_id
+
+    async def _fake_get_task_results(task_ids: list[str]):
+        return {task_id: {"task_id": task_id, "status": "queued"} for task_id in task_ids}
+
+    from app.api import candidates as candidates_api
+
+    monkeypatch.setattr(candidates_api, "enqueue_cv_processing", _fake_enqueue_cv_processing)
+    monkeypatch.setattr(candidates_api, "get_task_results", _fake_get_task_results)
+
+    email, password = asyncio.run(_seed_owner())
+    cv_text = b"Bulk Candidate\nbulk.candidate@example.com\nSkills\nPython, FastAPI"
+    app = create_app()
+    with TestClient(app) as client:
+        login = client.post("/api/v1/auth/login", json={"email": email, "password": password})
+        token = login.json()["access_token"]
+        response = client.post(
+            "/api/v1/candidates/async/bulk",
+            params={"use_llm": "false"},
+            files=[
+                ("files", ("bulk-a.txt", cv_text, "text/plain")),
+                ("files", ("bulk-b.txt", cv_text, "text/plain")),
+            ],
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200, response.text
+        tasks = response.json()["tasks"]
+        assert len(tasks) == 2
+        assert {task["filename"] for task in tasks} == {"bulk-a.txt", "bulk-b.txt"}
+        assert all(task["status"] == "queued" for task in tasks)
+        assert len(queued) == 2
+
+        statuses = client.get(
+            "/api/v1/candidates/async/bulk",
+            params=[("task_ids", task_id) for task_id in queued],
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert statuses.status_code == 200, statuses.text
+        assert set(statuses.json()) == set(queued)
+
+
 def test_create_candidate_succeeds_when_embedding_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     Checks that create candidate succeeds when embedding fails.
