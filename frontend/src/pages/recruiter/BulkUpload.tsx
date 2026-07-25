@@ -1,7 +1,31 @@
 import { useState, useRef } from 'react';
 import api from '../../api/client';
 import { Upload, CheckCircle, XCircle, Loader, FileText } from 'lucide-react';
-import { getApiErrorMessage } from '../../utils/errors';
+import { getApiErrorMessage, getApiStatus } from '../../utils/errors';
+
+const MAX_CONCURRENT_UPLOADS = 3;
+const MAX_NETWORK_RETRIES = 3;
+
+const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+const isTransientError = (error: unknown) => {
+  const status = getApiStatus(error);
+  return status === undefined || status === 408 || status === 425 || status === 429 || status >= 500;
+};
+
+async function withNetworkRetry<T>(operation: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < MAX_NETWORK_RETRIES; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientError(error) || attempt === MAX_NETWORK_RETRIES - 1) throw error;
+      await sleep(500 * (attempt + 1));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Network request failed');
+}
 
 export default function BulkUpload() {
   const [files, setFiles] = useState<File[]>([]);
@@ -17,9 +41,9 @@ export default function BulkUpload() {
 
   const pollTask = async (taskId: string) => {
     for (let attempt = 0; attempt < 180; attempt += 1) {
-      const { data } = await api.get(`/candidates/async/${taskId}`);
+      const { data } = await withNetworkRetry(() => api.get(`/candidates/async/${taskId}`));
       if (data.status === 'completed' || data.status === 'failed') return data;
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await sleep(2000);
     }
     throw new Error('Processing timed out');
   };
@@ -29,7 +53,7 @@ export default function BulkUpload() {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const { data } = await api.post('/candidates/async', formData);
+      const { data } = await withNetworkRetry(() => api.post('/candidates/async', formData));
       setResults((prev) => ({ ...prev, [file.name]: { status: 'queued' } }));
 
       const result = await pollTask(data.task_id);
@@ -52,7 +76,16 @@ export default function BulkUpload() {
     if (files.length === 0) return;
     setUploading(true);
     setResults({});
-    await Promise.all(files.map(uploadOne));
+    let nextIndex = 0;
+    const worker = async () => {
+      while (nextIndex < files.length) {
+        const file = files[nextIndex];
+        nextIndex += 1;
+        await uploadOne(file);
+      }
+    };
+    const workerCount = Math.min(MAX_CONCURRENT_UPLOADS, files.length);
+    await Promise.all(Array.from({ length: workerCount }, worker));
     setUploading(false);
   };
 
