@@ -1,0 +1,356 @@
+import uuid
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import select
+
+from app.core.db import SessionLocal, init_db
+from app.main import create_app
+from app.models.embedding import Embedding
+from app.models.interview import InterviewSession
+from app.models.job import Job
+from app.models.match_result import MatchResult
+from app.models.report import Report
+from app.models.user import User
+from app.schemas.job import JobUpdateRequest
+from app.services.auth import hash_password
+
+_VEC_384 = [0.0] * 384
+
+
+@pytest.mark.asyncio
+async def test_update_job_embedding_text_includes_title(monkeypatch: pytest.MonkeyPatch):
+    """
+    Checks that job embedding text includes the updated job title.
+    """
+    from app.api import jobs as jobs_api
+
+    class RecordingEmbeddingService:
+        def __init__(self) -> None:
+            self.texts: list[str] = []
+
+        async def embed(self, texts: list[str]) -> list[list[float]]:
+            self.texts.extend(texts)
+            return [[0.0] * 384 for _ in texts]
+
+    await init_db()
+    recorder = RecordingEmbeddingService()
+    monkeypatch.setattr(jobs_api, "get_embedding_service", lambda: recorder)
+
+    async with SessionLocal() as session:
+        job_id = str(uuid.uuid4())
+        session.add(Job(
+            id=job_id,
+            title="Old Title",
+            description="Build APIs with Python.",
+            required_skills=["python"],
+            optional_skills=[],
+            seniority="mid",
+        ))
+        await session.commit()
+
+        await jobs_api.update_job(
+            job_id,
+            JobUpdateRequest(title="ML Platform Engineer"),
+            None,
+            session,
+        )
+
+    assert recorder.texts == ["ML Platform Engineer Build APIs with Python."]
+
+
+@pytest.mark.asyncio
+async def test_update_job_clears_stale_match_results_when_matching_inputs_change():
+    """
+    Checks that update job clears stale match results when matching inputs change.
+    """
+    await init_db()
+    async with SessionLocal() as session:
+        user = User(
+            id=str(uuid.uuid4()),
+            email="admin@update.com",
+            password_hash=hash_password("p"),
+            full_name="Admin",
+            role="owner",
+        )
+        job_id = str(uuid.uuid4())
+        session.add_all([
+            user,
+            Job(
+                id=job_id,
+                title="Frontend Engineer",
+                description="Need React.",
+                required_skills=["react"],
+                optional_skills=[],
+                seniority="mid",
+            ),
+            MatchResult(
+                job_id=job_id,
+                candidate_id=str(uuid.uuid4()),
+                score=1.0,
+                reasoning={"matched_required": ["react"]},
+            ),
+        ])
+        await session.commit()
+
+    app = create_app()
+    with TestClient(app) as client:
+        login = client.post("/api/v1/auth/login", json={"email": "admin@update.com", "password": "p"})
+        token = login.json()["access_token"]
+        response = client.patch(
+            f"/api/v1/jobs/{job_id}",
+            json={"required_skills": ["react", "typescript"]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200, response.text
+    async with SessionLocal() as session:
+        rows = (await session.execute(select(MatchResult).where(MatchResult.job_id == job_id))).scalars().all()
+        assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_update_job_canonicalizes_skill_aliases_before_persisting():
+    """
+    Checks that update job canonicalizes skill aliases before persisting.
+    """
+    await init_db()
+    async with SessionLocal() as session:
+        user = User(
+            id=str(uuid.uuid4()),
+            email="admin@aliases.com",
+            password_hash=hash_password("p"),
+            full_name="Admin",
+            role="owner",
+        )
+        job_id = str(uuid.uuid4())
+        session.add_all([
+            user,
+            Job(
+                id=job_id,
+                title="Junior Backend",
+                description="Need APIs.",
+                required_skills=["python"],
+                optional_skills=[],
+                seniority="junior",
+            ),
+        ])
+        await session.commit()
+
+    app = create_app()
+    with TestClient(app) as client:
+        login = client.post("/api/v1/auth/login", json={"email": "admin@aliases.com", "password": "p"})
+        token = login.json()["access_token"]
+        response = client.patch(
+            f"/api/v1/jobs/{job_id}",
+            json={"optional_skills": ["mongose", "RESTful APIs"]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["optional_skills"] == ["mongoose", "rest api"]
+    async with SessionLocal() as session:
+        job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
+        assert job.optional_skills == ["mongoose", "rest api"]
+
+
+@pytest.mark.asyncio
+async def test_update_job_rejects_empty_description():
+    """
+    Checks that job updates cannot persist an empty description.
+    """
+    await init_db()
+    async with SessionLocal() as session:
+        user = User(
+            id=str(uuid.uuid4()),
+            email="admin@empty-description.com",
+            password_hash=hash_password("p"),
+            full_name="Admin",
+            role="owner",
+        )
+        job_id = str(uuid.uuid4())
+        session.add_all([
+            user,
+            Job(
+                id=job_id,
+                title="Backend Engineer",
+                description="Need Python APIs.",
+                required_skills=["python"],
+                optional_skills=[],
+                seniority="mid",
+            ),
+        ])
+        await session.commit()
+
+    app = create_app()
+    with TestClient(app) as client:
+        login = client.post("/api/v1/auth/login", json={"email": "admin@empty-description.com", "password": "p"})
+        token = login.json()["access_token"]
+        response = client.patch(
+            f"/api/v1/jobs/{job_id}",
+            json={"description": "   "},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 422
+    async with SessionLocal() as session:
+        job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
+        assert job.description == "Need Python APIs."
+
+
+@pytest.mark.asyncio
+async def test_list_jobs_tolerates_legacy_empty_description():
+    """
+    Checks that legacy rows with empty descriptions do not break job listing.
+    """
+    await init_db()
+    async with SessionLocal() as session:
+        user = User(
+            id=str(uuid.uuid4()),
+            email="admin@legacy-empty-description.com",
+            password_hash=hash_password("p"),
+            full_name="Admin",
+            role="owner",
+        )
+        job_id = str(uuid.uuid4())
+        session.add_all([
+            user,
+            Job(
+                id=job_id,
+                title="Legacy Empty Description",
+                description="",
+                required_skills=[],
+                optional_skills=[],
+                seniority="junior",
+            ),
+        ])
+        await session.commit()
+
+    app = create_app()
+    with TestClient(app) as client:
+        login = client.post("/api/v1/auth/login", json={"email": "admin@legacy-empty-description.com", "password": "p"})
+        token = login.json()["access_token"]
+        response = client.get("/api/v1/jobs", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200, response.text
+    rows = [row for row in response.json() if row["job_id"] == job_id]
+    assert len(rows) == 1
+    assert rows[0]["description"] == "Legacy Empty Description"
+
+
+@pytest.mark.asyncio
+async def test_delete_job_happy_path():
+    """Delete a job that has related MatchResult, InterviewSession, Report, Embedding."""
+    await init_db()
+    async with SessionLocal() as session:
+        user = User(
+            id=str(uuid.uuid4()), email="admin@del.com",
+            password_hash=hash_password("p"), full_name="Admin", role="owner",
+        )
+        session.add(user)
+        job_id = str(uuid.uuid4())
+        session.add(Job(id=job_id, title="T", description="D", required_skills=[], optional_skills=[], seniority="mid"))
+        session.add(MatchResult(job_id=job_id, candidate_id=str(uuid.uuid4()), score=0.9, reasoning={}))
+        session.add(InterviewSession(id=str(uuid.uuid4()), job_id=job_id, candidate_id=str(uuid.uuid4()),
+                                     questions=[], answers=[], evaluations=[], chat_history=[], status="completed"))
+        session.add(Report(id=str(uuid.uuid4()), job_id=job_id, candidate_id=str(uuid.uuid4()),
+                           overall_score=0.8, score_breakdown={}, skill_gap={}, strengths=[], weaknesses=[], recommendation=""))
+        session.add(Embedding(entity_type="job", entity_id=job_id, embedding_json=_VEC_384, embedding_vector=_VEC_384))
+        await session.commit()
+
+    app = create_app()
+    with TestClient(app) as client:
+        login = client.post("/api/v1/auth/login", json={"email": "admin@del.com", "password": "p"})
+        assert login.status_code == 200
+        token = login.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        resp = client.delete(f"/api/v1/jobs/{job_id}", headers=headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"status": "deleted", "job_id": job_id}
+
+    async with SessionLocal() as session:
+        assert (await session.execute(select(Job).where(Job.id == job_id))).scalar_one_or_none() is None
+        assert (await session.execute(select(MatchResult).where(MatchResult.job_id == job_id))).scalars().all() == []
+        assert (await session.execute(select(InterviewSession).where(InterviewSession.job_id == job_id))).scalars().all() == []
+        assert (await session.execute(select(Report).where(Report.job_id == job_id))).scalars().all() == []
+        assert (await session.execute(
+            select(Embedding).where(Embedding.entity_type == "job", Embedding.entity_id == job_id))).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_delete_job_no_related_data():
+    """Delete a job that has no related data (just the Job row)."""
+    await init_db()
+    async with SessionLocal() as session:
+        user = User(
+            id=str(uuid.uuid4()), email="admin@del2.com",
+            password_hash=hash_password("p"), full_name="Admin", role="owner",
+        )
+        session.add(user)
+        job_id = str(uuid.uuid4())
+        session.add(Job(id=job_id, title="T", description="D", required_skills=[], optional_skills=[], seniority="mid"))
+        await session.commit()
+
+    app = create_app()
+    with TestClient(app) as client:
+        login = client.post("/api/v1/auth/login", json={"email": "admin@del2.com", "password": "p"})
+        token = login.json()["access_token"]
+        resp = client.delete(f"/api/v1/jobs/{job_id}", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "deleted"
+
+
+@pytest.mark.asyncio
+async def test_delete_nonexistent_job():
+    """Deleting a job that does not exist should return 404."""
+    await init_db()
+    async with SessionLocal() as session:
+        user = User(
+            id=str(uuid.uuid4()), email="admin@del3.com",
+            password_hash=hash_password("p"), full_name="Admin", role="owner",
+        )
+        session.add(user)
+        await session.commit()
+
+    app = create_app()
+    with TestClient(app) as client:
+        login = client.post("/api/v1/auth/login", json={"email": "admin@del3.com", "password": "p"})
+        token = login.json()["access_token"]
+        resp = client.delete(f"/api/v1/jobs/{str(uuid.uuid4())}", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Job not found"
+
+
+@pytest.mark.asyncio
+async def test_delete_job_unauthorized():
+    """Users with role 'candidate' should not be allowed to delete jobs."""
+    await init_db()
+    async with SessionLocal() as session:
+        user = User(
+            id=str(uuid.uuid4()), email="cand@del.com",
+            password_hash=hash_password("p"), full_name="Candidate", role="candidate",
+        )
+        session.add(user)
+        job_id = str(uuid.uuid4())
+        session.add(Job(id=job_id, title="T", description="D", required_skills=[], optional_skills=[], seniority="mid"))
+        await session.commit()
+
+    app = create_app()
+    with TestClient(app) as client:
+        login = client.post("/api/v1/auth/login", json={"email": "cand@del.com", "password": "p"})
+        token = login.json()["access_token"]
+        resp = client.delete(f"/api/v1/jobs/{job_id}", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 403
+
+    async with SessionLocal() as session:
+        assert (await session.execute(select(Job).where(Job.id == job_id))).scalar_one_or_none() is not None
+
+
+@pytest.mark.asyncio
+async def test_delete_job_unauthenticated():
+    """Request without a token should return 401."""
+    app = create_app()
+    with TestClient(app) as client:
+        resp = client.delete(f"/api/v1/jobs/{str(uuid.uuid4())}")
+        assert resp.status_code == 401
