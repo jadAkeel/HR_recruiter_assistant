@@ -1,206 +1,200 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import api from '../../api/client';
-import { Upload, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { Upload, CheckCircle, Loader2, AlertCircle, Sparkles, FileText } from 'lucide-react';
 import type { CandidateUploadResult } from '../../types/api';
 import { getApiErrorMessage } from '../../utils/errors';
-import { buildAuthenticatedWebSocketUrl } from '../../utils/network';
 
 export default function UploadCV() {
   const [result, setResult] = useState<CandidateUploadResult | null>(null);
   const [error, setError] = useState('');
-  const [status, setStatus] = useState<'idle' | 'uploading' | 'queued' | 'processing' | 'done' | 'error'>('idle');
-  const wsRef = useRef<WebSocket | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [status, setStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
+  const [useLlm, setUseLlm] = useState(false);
+  const [fileName, setFileName] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    return () => {
-      wsRef.current?.close();
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, []);
-
-  const isFinishedStatus = (status: string) => {
-    return status === 'completed' || status === 'created' || status === 'updated' || status === 'success' || status === 'failed';
-  };
-
-  const startPolling = (taskId: string, file?: File) => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    setStatus('processing');
-    let attempts = 0;
-    pollRef.current = setInterval(async () => {
-      attempts += 1;
-      try {
-        const { data } = await api.get(`/candidates/async/${taskId}`);
-        if (data && isFinishedStatus(data.status)) {
-          if (pollRef.current) clearInterval(pollRef.current);
-          pollRef.current = null;
-          if (data.status === 'failed') {
-            setError(data.error || 'Processing failed');
-            setStatus('error');
-          } else {
-            setResult(data);
-            setStatus('done');
-          }
-        } else if (attempts > 30 && file) {
-          if (pollRef.current) clearInterval(pollRef.current);
-          pollRef.current = null;
-          try {
-            const formData = new FormData();
-            formData.append('file', file);
-            const { data: syncData } = await api.post('/candidates', formData, { params: { use_llm: false } });
-            setResult(syncData);
-            setStatus('done');
-          } catch (syncErr: unknown) {
-            setError(getApiErrorMessage(syncErr, 'Upload timed out'));
-            setStatus('error');
-          }
-        }
-      } catch {
-        // Poll again on transient errors.
-      }
-    }, 1500);
-  };
-
-  const waitForResult = (taskId: string, file?: File) => {
-    startPolling(taskId, file);
-    let finished = false;
-    try {
-      const ws = new WebSocket(buildAuthenticatedWebSocketUrl('/ws/cv-notifications'));
-      wsRef.current = ws;
-
-      ws.onopen = () => setStatus('queued');
-
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'ping') return;
-        if (data.type === 'error') {
-          startPolling(taskId, file);
-          return;
-        }
-        if (data.task_id === taskId && isFinishedStatus(data.status)) {
-          finished = true;
-          ws.close();
-          if (pollRef.current) {
-            clearInterval(pollRef.current);
-            pollRef.current = null;
-          }
-          if (data.status === 'failed') {
-            setError(data.error || 'Processing failed');
-            setStatus('error');
-          } else {
-            setResult(data);
-            setStatus('done');
-          }
-        }
-      };
-
-      ws.onerror = () => {
-        startPolling(taskId, file);
-      };
-
-      ws.onclose = () => {
-        if (!finished) startPolling(taskId, file);
-      };
-    } catch {
-      startPolling(taskId, file);
-    }
-  };
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleFile = async (file: File) => {
     if (!file) return;
+    setFileName(file.name);
     setError('');
     setStatus('uploading');
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const { data } = await api.post('/candidates/async', formData);
-      setStatus('queued');
-      waitForResult(data.task_id, file);
-    } catch {
-      // Fallback to synchronous candidate upload
-      try {
-        const formData = new FormData();
-        formData.append('file', file);
-        const { data } = await api.post('/candidates', formData, { params: { use_llm: false } });
-        setResult(data);
-        setStatus('done');
-      } catch (fallbackErr: unknown) {
-        setError(getApiErrorMessage(fallbackErr, 'Upload failed'));
-        setStatus('error');
-      }
+      const { data } = await api.post('/candidates', formData, {
+        params: { use_llm: useLlm },
+      });
+      setResult(data);
+      setStatus('done');
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Upload failed'));
+      setStatus('error');
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      void handleFile(file);
+    }
+  };
+
+  const triggerFileInput = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
     }
   };
 
   return (
-    <div>
+    <div className="max-w-3xl mx-auto">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Upload Your CV</h1>
 
       {status === 'idle' && (
-        <div className="bg-white rounded-xl shadow-sm border p-8 text-center">
-          <Upload className="w-16 h-16 mx-auto mb-4 text-blue-500" />
-          <p className="text-gray-600 mb-4">Upload your CV in PDF, DOCX, or TXT format</p>
-          <label className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer">
-            Choose File
-            <input type="file" accept=".pdf,.docx,.txt" onChange={handleUpload} className="hidden" />
-          </label>
+        <div className="bg-white rounded-xl shadow-sm border p-8 space-y-6">
+          <div
+            className="border-2 border-dashed border-blue-200 rounded-xl p-10 text-center hover:border-blue-500 hover:bg-blue-50/30 transition-all cursor-pointer"
+            onClick={triggerFileInput}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const droppedFile = e.dataTransfer.files?.[0];
+              if (droppedFile) void handleFile(droppedFile);
+            }}
+          >
+            <Upload className="w-16 h-16 mx-auto mb-4 text-blue-500" />
+            <p className="text-lg font-semibold text-gray-800 mb-1">
+              Drag & drop your CV here, or click to browse
+            </p>
+            <p className="text-sm text-gray-500 mb-4">
+              Supported formats: PDF, DOCX, TXT (up to 15MB)
+            </p>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                triggerFileInput();
+              }}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 shadow transition-colors"
+            >
+              <FileText className="w-5 h-5" />
+              Choose File
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between pt-2 border-t text-sm text-gray-600">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={useLlm}
+                onChange={(e) => setUseLlm(e.target.checked)}
+                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span className="flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-amber-500" />
+                Enable Deep AI analysis (Ollama)
+              </span>
+            </label>
+            <span className="text-xs text-gray-400">
+              {useLlm ? 'Slower (~30s) detailed reasoning' : 'Instant (<1s) ESCO parsing'}
+            </span>
+          </div>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.docx,.txt"
+            onChange={handleInputChange}
+            className="hidden"
+          />
         </div>
       )}
 
       {status === 'uploading' && (
-        <div className="bg-white rounded-xl shadow-sm border p-8 text-center">
-          <Upload className="w-16 h-16 mx-auto mb-4 text-blue-500 animate-pulse" />
-          <p className="text-gray-600">Uploading...</p>
-        </div>
-      )}
-
-      {status === 'queued' && (
-        <div className="bg-white rounded-xl shadow-sm border p-8 text-center">
-          <Clock className="w-16 h-16 mx-auto mb-4 text-yellow-500 animate-spin" />
-          <p className="text-gray-600">CV queued for processing...</p>
-        </div>
-      )}
-
-      {status === 'processing' && (
-        <div className="bg-white rounded-xl shadow-sm border p-8 text-center">
-          <Clock className="w-16 h-16 mx-auto mb-4 text-yellow-500 animate-spin" />
-          <p className="text-gray-600">Processing CV...</p>
-        </div>
-      )}
-
-      {(status === 'done') && result && (
-        <div className="bg-white rounded-xl shadow-sm border p-6">
-          <div className="flex items-center gap-3 text-green-600 mb-6">
-            <CheckCircle className="w-6 h-6" />
-            <span className="font-semibold">CV Processed Successfully</span>
+        <div className="bg-white rounded-xl shadow-sm border p-12 text-center space-y-4">
+          <Loader2 className="w-14 h-14 mx-auto text-blue-600 animate-spin" />
+          <div>
+            <p className="text-lg font-semibold text-gray-900">
+              {useLlm ? 'Analyzing CV with AI...' : 'Parsing and indexing CV...'}
+            </p>
+            <p className="text-sm text-gray-500 mt-1">{fileName}</p>
           </div>
-          <div className="space-y-4">
+          <p className="text-xs text-gray-400">
+            Extracting skills, experience, and contact details
+          </p>
+        </div>
+      )}
+
+      {status === 'done' && result && (
+        <div className="bg-white rounded-xl shadow-sm border p-8 space-y-6">
+          <div className="flex items-center gap-3 text-green-600 border-b pb-4">
+            <CheckCircle className="w-7 h-7" />
             <div>
-              <p className="text-sm text-gray-500">Name</p>
-              <p className="font-medium">{result.full_name}</p>
+              <h2 className="text-lg font-bold">CV Processed Successfully</h2>
+              <p className="text-xs text-green-700">Candidate added to the hiring database</p>
             </div>
-            <div>
-              <p className="text-sm text-gray-500">Email</p>
-              <p className="font-medium">{result.email}</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Full Name</p>
+              <p className="text-base font-medium text-gray-900 mt-1">{result.full_name || 'Not detected'}</p>
             </div>
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Email</p>
+              <p className="text-base font-medium text-gray-900 mt-1">{result.email || 'Not detected'}</p>
+            </div>
+          </div>
+
+          {result.skills && result.skills.length > 0 && (
             <div>
-              <p className="text-sm text-gray-500">Skills</p>
-              <div className="flex gap-2 flex-wrap mt-1">
-                {result.skills?.map((s: string) => <span key={s} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">{s}</span>)}
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                Extracted Skills ({result.skills.length})
+              </p>
+              <div className="flex gap-2 flex-wrap">
+                {result.skills.map((s: string) => (
+                  <span
+                    key={s}
+                    className="px-2.5 py-1 bg-blue-50 text-blue-700 border border-blue-100 rounded-md text-xs font-medium"
+                  >
+                    {s}
+                  </span>
+                ))}
               </div>
             </div>
+          )}
+
+          <div className="pt-4 border-t flex items-center justify-between">
+            <button
+              onClick={() => {
+                setResult(null);
+                setStatus('idle');
+              }}
+              className="text-sm font-medium text-blue-600 hover:text-blue-800"
+            >
+              ← Upload another CV
+            </button>
+            <a
+              href="/candidates"
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
+            >
+              View in Candidates List
+            </a>
           </div>
-          <button onClick={() => { setResult(null); setStatus('idle'); }} className="mt-6 text-sm text-blue-600 hover:underline">
-            Upload another CV
-          </button>
         </div>
       )}
 
       {status === 'error' && (
-        <div className="bg-white rounded-xl shadow-sm border p-8 text-center">
-          <AlertCircle className="w-16 h-16 mx-auto mb-4 text-red-500" />
-          <p className="text-red-600 mb-4">{error || 'Upload failed'}</p>
-          <button onClick={() => { setError(''); setStatus('idle'); }} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+        <div className="bg-white rounded-xl shadow-sm border p-10 text-center space-y-4">
+          <AlertCircle className="w-14 h-14 mx-auto text-red-500" />
+          <h2 className="text-lg font-bold text-gray-900">Upload Failed</h2>
+          <p className="text-sm text-red-600 max-w-md mx-auto">{error || 'Could not process the uploaded file'}</p>
+          <button
+            onClick={() => {
+              setError('');
+              setStatus('idle');
+            }}
+            className="px-6 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors shadow"
+          >
             Try Again
           </button>
         </div>

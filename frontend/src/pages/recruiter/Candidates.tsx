@@ -249,7 +249,16 @@ export default function Candidates() {
           <label className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer disabled:opacity-50">
             <Upload className="w-4 h-4" />
             {uploading ? 'Uploading...' : 'Upload CV'}
-            <input type="file" accept=".pdf,.docx,.txt" onChange={handleUpload} className="hidden" disabled={uploading} />
+            <input
+              type="file"
+              accept=".pdf,.docx,.txt"
+              onClick={(e) => {
+                (e.target as HTMLInputElement).value = '';
+              }}
+              onChange={handleUpload}
+              className="hidden"
+              disabled={uploading}
+            />
           </label>
         </div>
       </div>
