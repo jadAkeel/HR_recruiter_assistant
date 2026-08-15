@@ -60,7 +60,7 @@ async def _check_ollama_models() -> dict[str, Any]:
         return _result(True, "ollama not required", required_models=[])
 
     try:
-        timeout = httpx.Timeout(settings.ai_request_timeout_seconds)
+        timeout = httpx.Timeout(3.0)
         async with httpx.AsyncClient(base_url=settings.ollama_base_url, timeout=timeout) as client:
             response = await client.get("/api/tags")
             response.raise_for_status()

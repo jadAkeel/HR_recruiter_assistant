@@ -307,6 +307,14 @@ def create_app() -> FastAPI:
     )
     app.include_router(api_router, prefix=settings.api_prefix)
 
+    @app.get("/health", tags=["Health"])
+    @app.get("/", tags=["Health"])
+    async def root_health() -> dict[str, str]:
+        """
+        Root health check for load balancers and Render pings.
+        """
+        return {"status": "ok", "app": settings.app_name}
+
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         """
