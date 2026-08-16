@@ -19,7 +19,14 @@ import LiveInterview from './pages/LiveInterview';
 import VideoInterview from './pages/VideoInterview';
 
 function HomeRedirect() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-200 border-b-blue-600" />
+      </div>
+    );
+  }
   if (!user) return <Navigate to="/login" replace />;
   return <Navigate to="/dashboard" replace />;
 }
