@@ -1,8 +1,12 @@
 import { NavLink } from 'react-router-dom';
+import { useAuth } from '../context/auth';
 import { LayoutDashboard, FileText, Users, GitCompare, MessageSquare, BarChart3, Upload, UploadCloud } from 'lucide-react';
 
 export function Sidebar() {
-  const links = [
+  const { user } = useAuth();
+  const isCandidate = user?.role === 'candidate';
+
+  const recruiterLinks = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { to: '/jobs', label: 'Jobs', icon: FileText },
     { to: '/candidates', label: 'Candidates', icon: Users },
@@ -13,6 +17,16 @@ export function Sidebar() {
     { to: '/interviews', label: 'Interviews', icon: MessageSquare },
     { to: '/reports', label: 'Reports', icon: BarChart3 },
   ];
+
+  const candidateLinks = [
+    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { to: '/upload-cv', label: 'Upload CV', icon: Upload },
+    { to: '/jobs', label: 'Jobs', icon: FileText },
+    { to: '/my-interviews', label: 'Technical Interview', icon: MessageSquare },
+    { to: '/my-results', label: 'My Results', icon: BarChart3 },
+  ];
+
+  const links = isCandidate ? candidateLinks : recruiterLinks;
 
   return (
     <>

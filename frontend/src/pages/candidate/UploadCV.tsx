@@ -1,16 +1,21 @@
 import { useState, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../../api/client';
-import { Upload, CheckCircle, Loader2, AlertCircle, Sparkles, FileText } from 'lucide-react';
+import { useAuth } from '../../context/auth';
+import { Upload, CheckCircle, Loader2, AlertCircle, Sparkles, FileText, ArrowRight } from 'lucide-react';
 import type { CandidateUploadResult } from '../../types/api';
 import { getApiErrorMessage } from '../../utils/errors';
 
 export default function UploadCV() {
+  const { user } = useAuth();
   const [result, setResult] = useState<CandidateUploadResult | null>(null);
   const [error, setError] = useState('');
   const [status, setStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
   const [useLlm, setUseLlm] = useState(false);
   const [fileName, setFileName] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isCandidate = user?.role === 'candidate';
 
   const handleFile = async (file: File) => {
     if (!file) return;
@@ -130,7 +135,9 @@ export default function UploadCV() {
             <CheckCircle className="w-7 h-7" />
             <div>
               <h2 className="text-lg font-bold">CV Processed Successfully</h2>
-              <p className="text-xs text-green-700">Candidate added to the hiring database</p>
+              <p className="text-xs text-green-700">
+                {isCandidate ? 'Your profile has been updated and indexed.' : 'Candidate added to the hiring database.'}
+              </p>
             </div>
           </div>
 
@@ -163,7 +170,7 @@ export default function UploadCV() {
             </div>
           )}
 
-          <div className="pt-4 border-t flex items-center justify-between">
+          <div className="pt-4 border-t flex flex-col sm:flex-row items-center justify-between gap-3">
             <button
               onClick={() => {
                 setResult(null);
@@ -173,12 +180,24 @@ export default function UploadCV() {
             >
               ← Upload another CV
             </button>
-            <a
-              href="/candidates"
-              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
-            >
-              View in Candidates List
-            </a>
+            {isCandidate ? (
+              <div className="flex items-center gap-2">
+                <Link
+                  to="/my-interviews"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
+                >
+                  Proceed to Interview
+                  <ArrowRight className="w-4 h-4" />
+                </Link>
+              </div>
+            ) : (
+              <Link
+                to="/candidates"
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
+              >
+                View in Candidates List
+              </Link>
+            )}
           </div>
         </div>
       )}

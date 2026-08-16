@@ -6,6 +6,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import RecruiterDashboard from './pages/recruiter/Dashboard';
+import CandidateDashboard from './pages/candidate/Dashboard';
 import Jobs from './pages/recruiter/Jobs';
 import BulkUpload from './pages/recruiter/BulkUpload';
 import Candidates from './pages/recruiter/Candidates';
@@ -26,6 +27,14 @@ function HomeRedirect() {
   return <Navigate to="/dashboard" replace />;
 }
 
+function DashboardRoute() {
+  const { user } = useAuth();
+  if (user?.role === 'candidate') {
+    return <CandidateDashboard />;
+  }
+  return <RecruiterDashboard />;
+}
+
 function App() {
   return (
     <BrowserRouter>
@@ -36,14 +45,14 @@ function App() {
           <Route path="/" element={<HomeRedirect />} />
 
           <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-            <Route path="/dashboard" element={<ProtectedRoute><RecruiterDashboard /></ProtectedRoute>} />
+            <Route path="/dashboard" element={<ProtectedRoute><DashboardRoute /></ProtectedRoute>} />
             <Route path="/jobs" element={<ProtectedRoute><Jobs /></ProtectedRoute>} />
-            <Route path="/candidates" element={<ProtectedRoute><Candidates /></ProtectedRoute>} />
-            <Route path="/bulk-upload" element={<ProtectedRoute><BulkUpload /></ProtectedRoute>} />
-            <Route path="/matching" element={<ProtectedRoute><Matching /></ProtectedRoute>} />
-            <Route path="/match-results" element={<ProtectedRoute><MatchResults /></ProtectedRoute>} />
-            <Route path="/interviews" element={<ProtectedRoute><RecruiterInterviews /></ProtectedRoute>} />
-            <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+            <Route path="/candidates" element={<ProtectedRoute roles={['owner', 'admin', 'recruiter']}><Candidates /></ProtectedRoute>} />
+            <Route path="/bulk-upload" element={<ProtectedRoute roles={['owner', 'admin', 'recruiter']}><BulkUpload /></ProtectedRoute>} />
+            <Route path="/matching" element={<ProtectedRoute roles={['owner', 'admin', 'recruiter']}><Matching /></ProtectedRoute>} />
+            <Route path="/match-results" element={<ProtectedRoute roles={['owner', 'admin', 'recruiter']}><MatchResults /></ProtectedRoute>} />
+            <Route path="/interviews" element={<ProtectedRoute roles={['owner', 'admin', 'recruiter']}><RecruiterInterviews /></ProtectedRoute>} />
+            <Route path="/reports" element={<ProtectedRoute roles={['owner', 'admin', 'recruiter']}><Reports /></ProtectedRoute>} />
             <Route path="/upload-cv" element={<ProtectedRoute><UploadCV /></ProtectedRoute>} />
             <Route path="/my-interviews" element={<ProtectedRoute><CandidateInterview /></ProtectedRoute>} />
             <Route path="/my-results" element={<ProtectedRoute><CandidateResults /></ProtectedRoute>} />
