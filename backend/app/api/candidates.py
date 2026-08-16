@@ -264,6 +264,8 @@ async def _create_candidate_from_content(
             .where(Candidate.email == profile.email)
             .order_by(Candidate.id.asc())
         )
+        if created_by_user_id:
+            stmt = stmt.where(Candidate.created_by_user_id == created_by_user_id)
         result = await session.execute(stmt)
         existing_candidate = result.scalars().first()
 

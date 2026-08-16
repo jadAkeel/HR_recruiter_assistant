@@ -4,7 +4,7 @@ import logging
 from collections import Counter
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.candidate import Candidate
@@ -26,6 +26,13 @@ async def process_feedback_batch(
     Analyzes stored feedback and promotes repeated corrections to dynamic synonyms.
     """
     stmt = select(SkillFeedback).where(SkillFeedback.correct_match.is_(True))
+    if owner_user_id:
+        stmt = stmt.where(
+            or_(
+                SkillFeedback.created_by_user_id == owner_user_id,
+                SkillFeedback.created_by_user_id.is_(None),
+            )
+        )
     result = await session.execute(stmt)
     feedback_items = list(result.scalars().all())
     if not feedback_items:
@@ -93,13 +100,21 @@ async def get_feedback_stats(
     """
     Returns aggregate feedback and learning counters.
     """
+    base_filter = []
+    if owner_user_id:
+        base_filter.append(
+            or_(
+                SkillFeedback.created_by_user_id == owner_user_id,
+                SkillFeedback.created_by_user_id.is_(None),
+            )
+        )
     total = await session.scalar(
-        select(func.count()).select_from(SkillFeedback)
+        select(func.count()).select_from(SkillFeedback).where(*base_filter)
     ) or 0
     positive = await session.scalar(
         select(func.count())
         .select_from(SkillFeedback)
-        .where(SkillFeedback.correct_match.is_(True))
+        .where(SkillFeedback.correct_match.is_(True), *base_filter)
     ) or 0
     return {
         "total_feedback": int(total),

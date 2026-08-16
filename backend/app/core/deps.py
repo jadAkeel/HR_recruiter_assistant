@@ -8,18 +8,19 @@ from app.core.db import get_db_session
 from app.models.candidate import Candidate
 from app.models.user import User
 from app.services.auth import decode_token, get_user_by_id
-from sqlalchemy import select, true
+from sqlalchemy import or_, select
 
 from app.models.job import Job
 
 security = HTTPBearer(auto_error=False)
+STAFF_ROLES = {"owner", "admin", "recruiter"}
 
 
 def owned_resource_clause(model, user_id: str):
     """
-    Keeps ownership-aware queries API-compatible while sharing all resources.
+    Scopes resources to a user while allowing unowned legacy/fixture rows.
     """
-    return true()
+    return or_(model.created_by_user_id == user_id, model.created_by_user_id.is_(None))
 
 
 # Extract authenticated user from the Bearer token
@@ -76,18 +77,40 @@ def require_any_role(*roles: str):
 
 
 async def ensure_candidate_access(session: AsyncSession, user: User, candidate_id: str) -> None:
-    """Checks that an authenticated user requested an existing candidate."""
+    """Allow staff users to access only their own candidates and candidates their own CV row."""
+
+    role = user.role.lower()
+    if role in STAFF_ROLES:
+        result = await session.execute(
+            select(Candidate.id).where(
+                Candidate.id == candidate_id,
+                owned_resource_clause(Candidate, user.id),
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+        return
+    if role != "candidate":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     result = await session.execute(
-        select(Candidate.id).where(Candidate.id == candidate_id)
+        select(Candidate.id).where(
+            Candidate.id == candidate_id,
+            or_(Candidate.created_by_user_id == user.id, Candidate.email == user.email),
+        )
     )
     if result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
 async def ensure_job_access(session: AsyncSession, user: User, job_id: str) -> Job:
-    """Loads an existing job for an authenticated user."""
-    result = await session.execute(select(Job).where(Job.id == job_id))
+    """Loads a job owned by the current staff user."""
+    if user.role.lower() not in STAFF_ROLES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    result = await session.execute(
+        select(Job).where(Job.id == job_id, owned_resource_clause(Job, user.id))
+    )
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")

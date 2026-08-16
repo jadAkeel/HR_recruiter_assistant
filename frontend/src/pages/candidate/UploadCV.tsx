@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import api from '../../api/client';
+import api, { warmApi } from '../../api/client';
 import { useAuth } from '../../context/auth';
 import { Upload, CheckCircle, Loader2, AlertCircle, Sparkles, FileText, ArrowRight } from 'lucide-react';
 import type { CandidateUploadResult } from '../../types/api';
@@ -23,10 +23,12 @@ export default function UploadCV() {
     setError('');
     setStatus('uploading');
     try {
+      await warmApi();
       const formData = new FormData();
       formData.append('file', file);
       const { data } = await api.post('/candidates', formData, {
         params: { use_llm: useLlm },
+        timeout: 120_000,
       });
       setResult(data);
       setStatus('done');

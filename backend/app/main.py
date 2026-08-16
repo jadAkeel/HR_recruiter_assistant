@@ -167,6 +167,8 @@ async def _cv_worker():
                     .where(Candidate.email == profile.email)
                     .order_by(Candidate.id.asc())
                 )
+                if created_by_user_id:
+                    stmt = stmt.where(Candidate.created_by_user_id == created_by_user_id)
                 result = await session.execute(stmt)
                 existing = result.scalars().first()
                 if existing:
