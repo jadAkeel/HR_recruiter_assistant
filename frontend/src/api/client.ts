@@ -84,9 +84,13 @@ api.interceptors.response.use(
           const accessToken = await refreshPromise;
           originalRequest.headers.Authorization = `Bearer ${accessToken}`;
           return api(originalRequest);
-        } catch {
-          localStorage.clear();
-          window.location.href = '/login';
+        } catch (refreshError) {
+          const refreshStatus = axios.isAxiosError(refreshError) ? refreshError.response?.status : undefined;
+          if (refreshStatus === 400 || refreshStatus === 401 || refreshStatus === 403) {
+            localStorage.clear();
+            window.location.href = '/login';
+          }
+          return Promise.reject(refreshError);
         }
       } else {
         localStorage.clear();

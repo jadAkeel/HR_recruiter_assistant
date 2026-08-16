@@ -519,3 +519,60 @@ def test_create_candidate_reupload_updates_existing_profile_and_embedding() -> N
     assert "java" in candidate.skills
     assert "python" not in candidate.skills
     assert embedding is not None
+
+
+def test_create_candidate_reupload_handles_legacy_duplicate_emails() -> None:
+    """Updates one deterministic legacy record when candidate emails are duplicated."""
+    owner_email = f"duplicate-owner-{uuid.uuid4().hex[:8]}@example.com"
+    candidate_email = f"duplicate-candidate-{uuid.uuid4().hex[:8]}@example.com"
+    password = "password123"
+    canonical_id = "00000000-0000-0000-0000-000000000001"
+
+    async def _seed_duplicates() -> None:
+        await init_db()
+        async with SessionLocal() as session:
+            owner = User(
+                id=str(uuid.uuid4()),
+                email=owner_email,
+                password_hash=hash_password(password),
+                full_name="Duplicate Owner",
+                role="owner",
+            )
+            session.add(owner)
+            for candidate_id, name in (
+                (canonical_id, "Legacy Candidate A"),
+                ("ffffffff-ffff-ffff-ffff-ffffffffffff", "Legacy Candidate B"),
+            ):
+                session.add(Candidate(
+                    id=candidate_id,
+                    created_by_user_id=owner.id,
+                    full_name=name,
+                    email=candidate_email,
+                    skills=[],
+                    experience=[],
+                    education=[],
+                    projects=[],
+                    raw_text=name,
+                ))
+            await session.commit()
+
+    asyncio.run(_seed_duplicates())
+    app = create_app()
+    with TestClient(app) as client:
+        login = client.post("/api/v1/auth/login", json={"email": owner_email, "password": password})
+        token = login.json()["access_token"]
+        cv_text = f"""
+        Updated Duplicate Candidate
+        {candidate_email}
+        Skills
+        Python, FastAPI
+        """
+        response = client.post(
+            "/api/v1/candidates",
+            params={"use_llm": "false"},
+            files={"file": ("duplicate.txt", cv_text.encode("utf-8"), "text/plain")},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["candidate_id"] == canonical_id

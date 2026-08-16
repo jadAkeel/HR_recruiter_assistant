@@ -162,11 +162,13 @@ async def _cv_worker():
             profile = await parser.parse_async(cv_text) if parser else parse_cv_text(cv_text)
 
             if profile.email:
-                stmt = select(Candidate).where(Candidate.email == profile.email)
-                if created_by_user_id:
-                    stmt = stmt.where(Candidate.created_by_user_id == created_by_user_id)
+                stmt = (
+                    select(Candidate)
+                    .where(Candidate.email == profile.email)
+                    .order_by(Candidate.id.asc())
+                )
                 result = await session.execute(stmt)
-                existing = result.scalar_one_or_none()
+                existing = result.scalars().first()
                 if existing:
                     _apply_profile_to_candidate(existing, profile)
                     if content is not None:

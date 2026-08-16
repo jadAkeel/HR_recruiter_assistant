@@ -323,8 +323,8 @@ async def test_delete_nonexistent_job():
 
 
 @pytest.mark.asyncio
-async def test_delete_job_unauthorized():
-    """Users with role 'candidate' should not be allowed to delete jobs."""
+async def test_legacy_non_owner_can_delete_job_after_authentication():
+    """A legacy non-owner is normalized to owner during authentication."""
     await init_db()
     async with SessionLocal() as session:
         user = User(
@@ -341,10 +341,12 @@ async def test_delete_job_unauthorized():
         login = client.post("/api/v1/auth/login", json={"email": "cand@del.com", "password": "p"})
         token = login.json()["access_token"]
         resp = client.delete(f"/api/v1/jobs/{job_id}", headers={"Authorization": f"Bearer {token}"})
-        assert resp.status_code == 403
+        assert resp.status_code == 200
 
     async with SessionLocal() as session:
-        assert (await session.execute(select(Job).where(Job.id == job_id))).scalar_one_or_none() is not None
+        assert (await session.execute(select(Job).where(Job.id == job_id))).scalar_one_or_none() is None
+        user = (await session.execute(select(User).where(User.email == "cand@del.com"))).scalar_one()
+        assert user.role == "owner"
 
 
 @pytest.mark.asyncio

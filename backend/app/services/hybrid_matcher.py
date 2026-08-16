@@ -949,12 +949,6 @@ class HybridMatchingEngine:
                     SkillFeedback.job_id == job.id,
                     SkillFeedback.candidate_id.in_(candidate_ids),
                     SkillFeedback.correct_match.is_(True),
-                    (
-                        (SkillFeedback.created_by_user_id == job.created_by_user_id)
-                        | SkillFeedback.created_by_user_id.is_(None)
-                    )
-                    if job.created_by_user_id
-                    else True,
                 )
             )
             self._historical_feedback = {

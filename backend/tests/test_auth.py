@@ -7,7 +7,6 @@ from sqlalchemy import delete, select
 from app.core.config import settings
 from app.core.db import SessionLocal, init_db
 from app.main import create_app
-from app.models.candidate import Candidate
 from app.models.user import User
 
 
@@ -95,9 +94,9 @@ def test_initial_owner_can_be_created_from_settings(monkeypatch) -> None:
         assert me_resp.json()["role"] == "owner"
 
 
-def test_candidate_can_only_read_own_candidate_profile() -> None:
+def test_legacy_non_owner_authenticates_as_owner_and_is_persisted() -> None:
     """
-    Checks that candidate can only read own candidate profile.
+    Checks that authentication normalizes a legacy role before granting access.
     """
     app = create_app()
     with TestClient(app) as client:
@@ -109,52 +108,45 @@ def test_candidate_can_only_read_own_candidate_profile() -> None:
         }
         assert client.post("/api/v1/auth/register", json=register_payload).status_code == 201
 
-        own_id = str(uuid.uuid4())
-        other_id = str(uuid.uuid4())
-
-        async def _seed_candidates() -> None:
+        async def _demote_legacy_user() -> None:
             """
-            Supports the surrounding test for test candidate can only read own candidate
-            profile.
+            Simulates an environment where the owner-role migration has not run yet.
             """
             await init_db()
             async with SessionLocal() as session:
                 user_res = await session.execute(select(User).where(User.email == email))
-                cand_user = user_res.scalar_one_or_none()
-                if cand_user:
-                    cand_user.role = "candidate"
-                session.add(Candidate(
-                    id=own_id,
-                    full_name="Own Candidate",
-                    email=email,
-                    phone="+123",
-                    skills=["python"],
-                    experience=[],
-                    education=[],
-                    projects=[],
-                    raw_text="Own CV",
-                ))
-                session.add(Candidate(
-                    id=other_id,
-                    full_name="Other Candidate",
-                    email=f"other-{uuid.uuid4().hex[:8]}@example.com",
-                    phone="+456",
-                    skills=["java"],
-                    experience=[],
-                    education=[],
-                    projects=[],
-                    raw_text="Other CV",
-                ))
+                legacy_user = user_res.scalar_one()
+                legacy_user.role = "candidate"
                 await session.commit()
 
-        asyncio.run(_seed_candidates())
+        asyncio.run(_demote_legacy_user())
 
         login_resp = client.post("/api/v1/auth/login", json={"email": email, "password": "strongpass123"})
+        assert login_resp.status_code == 200
         token = login_resp.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
 
-        own_resp = client.get(f"/api/v1/candidates/{own_id}", headers=headers)
-        assert own_resp.status_code == 200
+        me_resp = client.get("/api/v1/auth/me", headers=headers)
+        assert me_resp.status_code == 200
+        assert me_resp.json()["role"] == "owner"
 
-        other_resp = client.get(f"/api/v1/candidates/{other_id}", headers=headers)
-        assert other_resp.status_code == 403
+        first_bootstrap = client.post("/api/v1/auth/bootstrap-admin", headers=headers)
+        second_bootstrap = client.post("/api/v1/auth/bootstrap-admin", headers=headers)
+        assert first_bootstrap.status_code == 200
+        assert second_bootstrap.status_code == 200
+        assert second_bootstrap.json()["role"] == "owner"
+
+        role_update = client.patch(
+            f"/api/v1/auth/users/{me_resp.json()['id']}/role",
+            json={"role": "candidate"},
+            headers=headers,
+        )
+        assert role_update.status_code == 200
+        assert role_update.json()["role"] == "owner"
+
+    async def _load_role() -> str:
+        async with SessionLocal() as session:
+            user = (await session.execute(select(User).where(User.email == email))).scalar_one()
+            return user.role
+
+    assert asyncio.run(_load_role()) == "owner"

@@ -259,11 +259,13 @@ async def _create_candidate_from_content(
 
     existing_candidate = None
     if profile.email:
-        stmt = select(Candidate).where(Candidate.email == profile.email)
-        if created_by_user_id:
-            stmt = stmt.where(Candidate.created_by_user_id == created_by_user_id)
+        stmt = (
+            select(Candidate)
+            .where(Candidate.email == profile.email)
+            .order_by(Candidate.id.asc())
+        )
         result = await session.execute(stmt)
-        existing_candidate = result.scalar_one_or_none()
+        existing_candidate = result.scalars().first()
 
     if existing_candidate:
         logger.info(
@@ -650,9 +652,7 @@ async def get_my_candidate_profile(
     """
     Returns the candidate profile linked to the current user email.
     """
-    stmt = select(Candidate).where(
-        (Candidate.created_by_user_id == current_user.id) | (Candidate.email == current_user.email)
-    )
+    stmt = select(Candidate).where(Candidate.email == current_user.email)
     result = await session.execute(stmt)
     candidate = result.scalars().first()
     if candidate is None:

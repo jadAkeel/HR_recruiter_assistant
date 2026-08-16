@@ -16,8 +16,8 @@ export default function Login() {
     setError('');
     setSubmitting(true);
     try {
-      const me = await login(email, password);
-      navigate(me.role === 'candidate' ? '/jobs' : '/dashboard');
+      await login(email, password);
+      navigate('/dashboard');
     } catch (err: unknown) {
       if (getApiStatus(err) === 401) {
         setError('Invalid email or password');

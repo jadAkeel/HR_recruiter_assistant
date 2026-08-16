@@ -14,8 +14,8 @@ export default function Register() {
     setError('');
     setSubmitting(true);
     try {
-      const me = await register(form.email, form.password, form.full_name);
-      navigate(me.role === 'candidate' ? '/jobs' : '/dashboard');
+      await register(form.email, form.password, form.full_name);
+      navigate('/dashboard');
     } catch (err) {
       const apiError = err as { response?: { data?: { detail?: string } } };
       setError(apiError.response?.data?.detail || 'Registration failed');

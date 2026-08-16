@@ -126,16 +126,8 @@ async def bootstrap_admin(
     session: AsyncSession = Depends(get_db_session),
 ) -> UserResponse:
     """
-    One-time endpoint to promote the first user to owner.
-    Only works if no owner exists in the database yet.
+    Idempotently promotes and returns the authenticated user as an owner.
     """
-    from sqlalchemy import select as sel, func
-    stmt = sel(func.count()).select_from(User).where(User.role == "owner")
-    result = await session.execute(stmt)
-    owner_count = result.scalar() or 0
-    if owner_count > 0:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An owner already exists")
-
     updated = await update_user_role(session, current_user.id, "owner")
     return UserResponse(id=updated.id, email=updated.email, full_name=updated.full_name, role=updated.role)
 

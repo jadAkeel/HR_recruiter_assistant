@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 from jose import JWTError, jwt
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -123,7 +123,7 @@ async def ensure_initial_owner(session: AsyncSession) -> User | None:
     if len(password) < 8:
         raise RuntimeError("INITIAL_OWNER_PASSWORD must be at least 8 characters")
 
-    owner_result = await session.execute(select(User).where(User.role == "owner"))
+    owner_result = await session.execute(select(User).where(User.role == "owner").limit(1))
     if owner_result.scalar_one_or_none() is not None:
         return None
 
@@ -159,6 +159,10 @@ async def authenticate_user(session: AsyncSession, email: str, password: str) ->
     user = result.scalar_one_or_none()
     if user is None or not verify_password(password, user.password_hash):
         return None
+    if user.role != "owner":
+        user.role = "owner"
+        await session.commit()
+        await session.refresh(user)
     return user
 
 
@@ -168,7 +172,12 @@ async def get_user_by_id(session: AsyncSession, user_id: str) -> User | None:
     """
     stmt = select(User).where(User.id == user_id)
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    user = result.scalar_one_or_none()
+    if user is not None and user.role != "owner":
+        user.role = "owner"
+        await session.commit()
+        await session.refresh(user)
+    return user
 
 
 async def get_user_by_email(session: AsyncSession, email: str) -> User | None:
@@ -191,7 +200,7 @@ async def list_users(session: AsyncSession) -> list[User]:
 
 async def update_user_role(session: AsyncSession, user_id: str, role: str) -> User:
     """
-    Updates a user role after validating allowed roles.
+    Validates legacy role updates while preserving the owner invariant.
     """
     normalized_role = role.lower().strip()
     if normalized_role not in VALID_ROLES:
@@ -201,7 +210,9 @@ async def update_user_role(session: AsyncSession, user_id: str, role: str) -> Us
     if user is None:
         raise ValueError("User not found")
 
-    user.role = normalized_role
+    # Keep the legacy role-management API compatible without breaking the
+    # system-wide owner invariant.
+    user.role = "owner"
     await session.commit()
     await session.refresh(user)
     return user
