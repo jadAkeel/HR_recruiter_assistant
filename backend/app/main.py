@@ -289,7 +289,15 @@ def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(GZipMiddleware, minimum_size=1024)
-    trusted = settings.trusted_hosts + ["*.ngrok-free.app", "*.ngrok-free.dev", "*.ngrok.io", "localhost", "127.0.0.1"]
+    trusted = settings.trusted_hosts + [
+        "*.ngrok-free.app",
+        "*.ngrok-free.dev",
+        "*.ngrok.io",
+        "*.onrender.com",
+        "onrender.com",
+        "localhost",
+        "127.0.0.1",
+    ]
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted)
     if settings.rate_limit_enabled:
         app.add_middleware(

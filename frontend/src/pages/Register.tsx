@@ -41,8 +41,8 @@ export default function Register() {
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">Password</label>
-            <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required
+            <label className="mb-1 block text-sm font-medium text-gray-700">Password (min 8 characters)</label>
+            <input type="password" value={form.password} minLength={8} onChange={(e) => setForm({ ...form, password: e.target.value })} required
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
           </div>
           <button type="submit" disabled={submitting}

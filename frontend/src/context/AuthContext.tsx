@@ -14,7 +14,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data } = await api.post<User>('/auth/bootstrap-admin');
       return data;
     } catch {
-      return { ...me, role: 'owner' };
+      return me;
     }
   };
 
