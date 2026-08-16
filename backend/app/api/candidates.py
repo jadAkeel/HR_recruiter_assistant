@@ -463,6 +463,20 @@ async def get_async_results_bulk(
     return await get_task_results(task_ids)
 
 
+@router.post("/candidates/async/bulk/status")
+async def get_async_results_bulk_status_post(
+    body: dict[str, list[str]],
+    _: User = Depends(require_any_role("owner", "admin", "recruiter")),
+) -> dict[str, dict[str, Any]]:
+    """
+    Returns the status of many queued CV tasks via POST body.
+    """
+    task_ids = body.get("task_ids", [])
+    if not task_ids or len(task_ids) > 500:
+        raise HTTPException(status_code=400, detail="Provide between 1 and 500 task IDs")
+    return await get_task_results(task_ids)
+
+
 @router.get("/candidates/async/{task_id}")
 async def get_async_result(
     task_id: str,

@@ -51,7 +51,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         """
         Applies middleware logic before returning the response.
         """
-        if request.url.path.endswith(("/health", "/ready")):
+        if (
+            request.url.path.endswith(("/health", "/ready"))
+            or "/candidates/async" in request.url.path
+        ):
             return await call_next(request)
 
         now = time.monotonic()

@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     cors_origins_str: str = "http://localhost:5173,http://localhost:5174,http://localhost:3000"
     trusted_hosts_str: str = "localhost,127.0.0.1,testserver"
     rate_limit_enabled: bool = True
-    rate_limit_requests: int = 300
+    rate_limit_requests: int = 1200
     rate_limit_window_seconds: int = 60
 
     # File upload limits
