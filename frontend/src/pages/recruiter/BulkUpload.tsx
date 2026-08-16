@@ -91,7 +91,7 @@ export default function BulkUpload() {
       const formData = new FormData();
       files.forEach((file) => formData.append('files', file, file.name));
       const { data } = await withNetworkRetry(() => api.post('/candidates/async/bulk', formData, {
-        params: { use_llm: true },
+        params: { use_llm: false },
         timeout: 120_000,
       }));
       const queuedTasks: Array<{ task_id: string; filename: string }> = [];

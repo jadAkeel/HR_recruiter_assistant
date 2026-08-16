@@ -33,7 +33,7 @@ async def _read_limited_upload(file: UploadFile) -> bytes:
 async def parse_cv(
     file: UploadFile = File(...),
     use_llm: bool = Query(
-        default=True,
+        default=False,
         description="Use LLM (Ollama) for enhanced skill extraction and negation detection",
     ),
     _: User = Depends(require_any_role("owner", "admin", "recruiter", "candidate")),

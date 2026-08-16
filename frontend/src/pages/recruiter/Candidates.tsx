@@ -68,16 +68,6 @@ export default function Candidates() {
     void refresh();
   }, [loadCandidates]);
 
-  const waitForUploadTask = async (taskId: string) => {
-    for (let attempt = 0; attempt < 180; attempt += 1) {
-      const { data } = await api.get(`/candidates/async/${taskId}`);
-      if (data.status === 'completed') return;
-      if (data.status === 'failed') throw new Error(data.error || 'Upload failed');
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
-    throw new Error('Upload processing timed out');
-  };
-
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -85,12 +75,15 @@ export default function Candidates() {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const { data } = await api.post('/candidates/async', formData);
-      await waitForUploadTask(data.task_id);
+      await api.post('/candidates', formData, {
+        params: { use_llm: false },
+      });
       await loadCandidates();
     } catch (err: unknown) {
       alert(getApiErrorMessage(err, 'Upload failed'));
-    } finally { setUploading(false); }
+    } finally {
+      setUploading(false);
+    }
   };
 
   const toggleSkill = (skill: string) => {

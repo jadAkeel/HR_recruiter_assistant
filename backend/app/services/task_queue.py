@@ -24,7 +24,7 @@ _in_memory_results: dict[str, dict[str, Any]] = {}
 async def enqueue_cv_processing(
     cv_text: str | None,
     file_name: str,
-    use_llm: bool = True,
+    use_llm: bool = False,
     file_path: str | None = None,
     task_id: str | None = None,
     created_by_user_id: str | None = None,

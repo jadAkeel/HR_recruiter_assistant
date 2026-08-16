@@ -360,7 +360,7 @@ async def list_all_skills(
 async def create_candidate(
     file: UploadFile = File(...),
     use_llm: bool = Query(
-        default=True,
+        default=False,
         description="Use LLM (Ollama) for enhanced CV parsing (negation detection, skill levels)",
     ),
     current_user: User = Depends(require_any_role("owner", "admin", "recruiter", "candidate")),
@@ -387,7 +387,7 @@ async def create_candidate(
 @router.post("/candidates/async")
 async def create_candidate_async(
     file: UploadFile = File(...),
-    use_llm: bool = Query(default=True),
+    use_llm: bool = Query(default=False),
     current_user: User = Depends(require_any_role("owner", "admin", "recruiter", "candidate")),
 ) -> dict[str, str]:
     """
@@ -413,7 +413,7 @@ async def create_candidate_async(
 @router.post("/candidates/async/bulk")
 async def create_candidates_async_bulk(
     files: list[UploadFile] = File(...),
-    use_llm: bool = Query(default=True),
+    use_llm: bool = Query(default=False),
     current_user: User = Depends(require_any_role("owner", "admin", "recruiter")),
 ) -> dict[str, object]:
     """
@@ -855,7 +855,7 @@ async def delete_all_candidates(
 @router.post("/candidates/stream")
 async def stream_candidates(
     files: list[UploadFile] = File(...),
-    use_llm: bool = Query(default=True, description="Use LLM (Ollama) for enhanced CV parsing"),
+    use_llm: bool = Query(default=False, description="Use LLM (Ollama) for enhanced CV parsing"),
     current_user: User = Depends(require_any_role("owner", "admin", "recruiter")),
 ) -> StreamingResponse:
     """
