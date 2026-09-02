@@ -31,6 +31,10 @@ frontend/build/
 # Uploads
 backend/uploads/
 backend/temp_audio/
+backend/private_cv_imports/
+backend/cvs_to_upload/Real_*.pdf
+backend/cvs_to_upload/*jad*akil*.pdf
+backend/cvs_to_upload/*Jad*Akil*.pdf
 
 # IDE
 .idea/

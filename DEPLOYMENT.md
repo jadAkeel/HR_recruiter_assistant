@@ -10,14 +10,14 @@ This project is configured to be deployed on **Render** using a single-click blu
 
 ### 1. Update GitHub / تحديث مستودع جيت هاب
 The changes have been pushed to your GitHub repository:
-`https://github.com/jadAkeel/AI-recuriter.git`
+`https://github.com/jadAkeel/HR_recruiter_assistant.git`
 
 تم تحديث ورفع كافة التعديلات إلى مستودع GitHub الخاص بك.
 
 ### 2. Deploy on Render / النشر على Render
 1. Go to the [Render Dashboard](https://dashboard.render.com/).
 2. Click **New** (top right) and select **Blueprint**.
-3. Connect your GitHub account and select the **AI-recuriter** repository.
+3. Connect your GitHub account and select the **HR_recruiter_assistant** repository.
 4. Render will automatically detect the `render.yaml` blueprint. Click **Apply**.
 5. Render will now provision:
    - A PostgreSQL Database (with `pgvector` support).
@@ -27,7 +27,7 @@ The changes have been pushed to your GitHub repository:
 
 1. توجه إلى [لوحة تحكم Render](https://dashboard.render.com/).
 2. اضغط على زر **New** في أعلى اليمين واختر **Blueprint**.
-3. قم بربط حساب GitHub الخاص بك واختيار مستودع **AI-recuriter**.
+3. قم بربط حساب GitHub الخاص بك واختيار مستودع **HR_recruiter_assistant**.
 4. سيقرأ Render ملف `render.yaml` تلقائياً. اضغط على **Apply**.
 5. سيقوم Render بإنشاء وتشغيل المكونات التالية تلقائياً:
    - قاعدة بيانات PostgreSQL (مع دعم `pgvector`).

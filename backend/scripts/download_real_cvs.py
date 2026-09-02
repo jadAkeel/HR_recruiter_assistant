@@ -24,7 +24,9 @@ except ImportError:
     sys.exit(1)
 
 
-OUTPUT_DIR = Path(__file__).parent / "cvs_to_upload"
+# Real resumes contain personal data and must never be written to the tracked
+# synthetic fixture directory. This destination is ignored by Git.
+OUTPUT_DIR = Path(__file__).resolve().parents[1] / "private_cv_imports"
 MAX_CVS = 100
 
 DESIRED_CATEGORIES = {

@@ -343,8 +343,10 @@ def generate_resume(index: int) -> dict:
     first = random.choice(FIRST_NAMES)
     last = random.choice(LAST_NAMES)
     full_name = f"{first} {last}"
-    email = f"{first.lower()}.{last.lower()}{random.randint(1,999)}@gmail.com"
-    phone = f"+961-{random.randint(3,81)}-{random.randint(100000,999999)}"
+    # Reserved contact details keep generated resumes unambiguously synthetic
+    # and avoid accidentally publishing an address or phone number in use.
+    email = f"candidate{index:03d}@example.com"
+    phone = f"+1-202-555-{100 + (index % 100):04d}"
 
     lvl_name, level_cfg = pick_level()
     exp_years = random.randint(*level_cfg["years_range"])
@@ -420,7 +422,7 @@ def resume_to_text(resume: dict) -> str:
     """
     Formats a generated resume record as plain text.
     """
-    lines = []
+    lines = ["SYNTHETIC TEST RESUME - NOT A REAL PERSON", ""]
     lines.append(f"{resume['full_name']}")
     lines.append(f"Email: {resume['email']}")
     lines.append(f"Phone: {resume['phone']}")

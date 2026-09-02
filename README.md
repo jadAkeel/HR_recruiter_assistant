@@ -158,8 +158,8 @@ An AI-powered recruitment automation platform that covers the entire hiring life
 ### Development (Docker)
 
 ```bash
-git clone https://github.com/jadAkeel/AI-recuriter.git
-cd AI-recuriter
+git clone https://github.com/jadAkeel/HR_recruiter_assistant.git
+cd HR_recruiter_assistant
 
 docker-compose up --build
 ```
@@ -350,7 +350,7 @@ All endpoints are prefixed with `/api/v1`. Full interactive docs at http://local
 ## 📁 Project Structure
 
 ```
-AI-recuriter/
+HR_recruiter_assistant/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py                 # App bootstrap, lifespan, middleware
@@ -679,13 +679,18 @@ Saved as Report with versioning
 | `scripts/evaluate_cross_encoder_impact.py` | Evaluate cross-encoder scoring impact |
 | `scripts/generate_skill_catalog_extender.py` | Generate extended skill catalog entries |
 | `backend/scripts/backfill_production_readiness.py` | Backfill production data |
+| `backend/scripts/generate_cs_cvs.py` | Generate clearly labelled synthetic CV fixtures with reserved contact details |
+| `backend/scripts/download_real_cvs.py` | Download external CV data into the Git-ignored `backend/private_cv_imports/` directory |
 | `backend/check_candidates.py` | Diagnostic: inspect candidate data |
 | `backend/find_triple.py` | Diagnostic: find skill triples |
-| `backend/reset_pass.py` | Reset user password |
+| `backend/reset_pass.py` | Reset a local user password from a prompt or `RESET_USER_EMAIL` / `RESET_USER_PASSWORD` |
 | `check_db.py` | Inspect database contents |
 | `copy_candidates.py` | Copy candidates between environments |
 | `generate_report_final.py` | Generate final audit report |
 | `reset_password.py` | Password reset utility |
+
+The tracked PDFs in `backend/cvs_to_upload/` are synthetic test fixtures. Do
+not add real candidate resumes or personal contact data to that directory.
 
 ---
 
