@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
     first_user_owner_enabled: bool = False
+    allow_unowned_resources: bool = False
     initial_owner_email: str | None = None
     initial_owner_password: str | None = None
     initial_owner_full_name: str = "Initial Owner"
@@ -146,6 +147,8 @@ class Settings(BaseSettings):
             raise RuntimeError("Wildcard CORS origins are not allowed in production")
         if not self.trusted_hosts or "*" in self.trusted_hosts:
             raise RuntimeError("TRUSTED_HOSTS_STR must list explicit hostnames in production")
+        if self.allow_unowned_resources:
+            raise RuntimeError("ALLOW_UNOWNED_RESOURCES must be disabled in production")
 
 
 settings = Settings()

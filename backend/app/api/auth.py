@@ -22,7 +22,6 @@ from app.services.auth import (
     create_refresh_token,
     decode_token,
     get_user_by_id,
-    list_users,
     register_user,
     update_user_role,
 )
@@ -88,14 +87,17 @@ async def me(user: User = Depends(get_current_user)) -> UserResponse:
 
 @router.get("/auth/users", response_model=list[UserResponse])
 async def users_list(
-    _: User = Depends(require_any_role("owner", "admin")),
-    session: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(require_any_role("owner", "admin")),
 ) -> list[UserResponse]:
     """
-    Lists users for administrators.
+    Returns only the current account in the single-user workspace model.
     """
-    users = await list_users(session)
-    return [UserResponse(id=u.id, email=u.email, full_name=u.full_name, role=u.role) for u in users]
+    return [UserResponse(
+        id=current_user.id,
+        email=current_user.email,
+        full_name=current_user.full_name,
+        role=current_user.role,
+    )]
 
 
 @router.patch("/auth/users/{user_id}/role", response_model=UserResponse)
@@ -108,6 +110,9 @@ async def change_user_role(
     """
     Updates a user role with owner-role protections.
     """
+    if user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
     if request.role.lower() == "owner" and current_user.role.lower() != "owner":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only owner can assign owner role")
 

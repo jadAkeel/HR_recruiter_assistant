@@ -16,6 +16,7 @@ os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{TEST_DB_PATH.as_pos
 # Keep tests deterministic and independent from external services.
 os.environ.setdefault("EMBEDDING_PROVIDER", "hash")
 os.environ.setdefault("LLM_PROVIDER", "rule")
+os.environ.setdefault("ALLOW_UNOWNED_RESOURCES", "true")
 
 # Recreate SQLAlchemy engine so it picks up the env DATABASE_URL.
 from app.core import db as _db  # noqa: E402

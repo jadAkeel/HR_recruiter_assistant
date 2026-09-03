@@ -4,7 +4,10 @@ import uuid
 from fastapi.testclient import TestClient
 
 from app.api.candidates import _delete_cv_files
+from app.api.ws import _notification_for_user
+from app.core.config import settings
 from app.main import create_app
+from app.services import task_queue
 
 
 def _create_owner_account(client: TestClient, label: str) -> dict[str, str]:
@@ -25,7 +28,8 @@ def _create_owner_account(client: TestClient, label: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {login.json()['access_token']}"}
 
 
-def test_owner_data_is_isolated_by_account() -> None:
+def test_owner_data_is_isolated_by_account(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "allow_unowned_resources", False)
     app = create_app()
     fixture = Path(__file__).parent / "fixtures" / "cv_engineer.txt"
     cv_text = fixture.read_text(encoding="utf-8")
@@ -41,6 +45,31 @@ def test_owner_data_is_isolated_by_account() -> None:
     with TestClient(app) as client:
         owner_a = _create_owner_account(client, "owner-a")
         owner_b = _create_owner_account(client, "owner-b")
+        candidate_login = client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": candidate_email,
+                "password": "strongpass123",
+                "full_name": "Candidate Account",
+            },
+        )
+        assert candidate_login.status_code == 201
+        candidate_tokens = client.post(
+            "/api/v1/auth/login",
+            json={"email": candidate_email, "password": "strongpass123"},
+        ).json()
+        candidate_account = {"Authorization": f"Bearer {candidate_tokens['access_token']}"}
+
+        me_a = client.get("/api/v1/auth/me", headers=owner_a).json()
+        me_b = client.get("/api/v1/auth/me", headers=owner_b).json()
+        users_a = client.get("/api/v1/auth/users", headers=owner_a)
+        assert users_a.status_code == 200
+        assert [row["id"] for row in users_a.json()] == [me_a["id"]]
+        assert client.patch(
+            f"/api/v1/auth/users/{me_b['id']}/role",
+            json={"role": "owner"},
+            headers=owner_a,
+        ).status_code == 404
 
         job_a = client.post(
             "/api/v1/jobs",
@@ -72,6 +101,9 @@ def test_owner_data_is_isolated_by_account() -> None:
         candidate_a_id = candidate_a.json()["candidate_id"]
         candidate_b_id = candidate_b.json()["candidate_id"]
         assert candidate_a_id != candidate_b_id
+
+        # The login email matching a CV email is not enough to cross workspace boundaries.
+        assert client.get("/api/v1/candidates/me", headers=candidate_account).status_code == 404
 
         _delete_cv_files(candidate_a_id)
         downloaded_cv = client.get(
@@ -131,3 +163,53 @@ def test_owner_data_is_isolated_by_account() -> None:
         assert cross_interview.status_code == 404
 
         assert client.delete(f"/api/v1/jobs/{job_b_id}", headers=owner_b).status_code == 200
+
+
+def test_async_cv_results_are_isolated_by_owner(monkeypatch) -> None:
+    async def unavailable_redis():
+        return None
+
+    async def scenario() -> None:
+        monkeypatch.setattr(task_queue, "get_redis", unavailable_redis)
+        task_queue._in_memory_tasks.clear()
+        task_queue._in_memory_results.clear()
+        task_queue._in_memory_task_owners.clear()
+
+        task_id = await task_queue.enqueue_cv_processing(
+            cv_text="private cv",
+            file_name="private.txt",
+            task_id="private-task",
+            created_by_user_id="owner-a",
+        )
+        expected = {"task_id": task_id, "status": "completed", "email": "private@example.com"}
+        task_queue._in_memory_results[task_id] = expected
+
+        assert await task_queue.get_task_result(task_id, "owner-a") == expected
+        assert await task_queue.get_task_result(task_id, "owner-b") is None
+        assert (await task_queue.get_task_results([task_id], "owner-b"))[task_id] == {
+            "task_id": task_id,
+            "status": "pending",
+        }
+
+    try:
+        import asyncio
+
+        asyncio.run(scenario())
+    finally:
+        task_queue._in_memory_tasks.clear()
+        task_queue._in_memory_results.clear()
+        task_queue._in_memory_task_owners.clear()
+
+
+def test_cv_notifications_are_filtered_by_owner() -> None:
+    notification = {
+        "type": "cv_processed",
+        "created_by_user_id": "owner-a",
+        "email": "private@example.com",
+    }
+
+    assert _notification_for_user(notification, "owner-b") is None
+    assert _notification_for_user(notification, "owner-a") == {
+        "type": "cv_processed",
+        "email": "private@example.com",
+    }

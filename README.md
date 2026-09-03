@@ -229,6 +229,7 @@ Ollama models are pulled automatically on startup: `llama3.2`, `gemma3:4b`, `nom
 | `KEEP_ALIVE_INTERVAL_SECONDS` | `270` | Keep-alive interval in seconds; values below 60 are clamped |
 | `KEEP_ALIVE_URL` | auto from `RENDER_EXTERNAL_HOSTNAME` | Optional explicit URL to ping for keep-alive |
 | `FIRST_USER_OWNER_ENABLED` | `false` | Promote the first registered account to owner when no users exist |
+| `ALLOW_UNOWNED_RESOURCES` | `false` | Test-only compatibility for legacy rows without an owner; never enable in production |
 | `INITIAL_OWNER_EMAIL` / `INITIAL_OWNER_PASSWORD` | not set | Optional fixed owner account created/promoted on startup when no owner exists |
 | `SMTP_*` | — | Email configuration for interview invitations |
 
@@ -252,8 +253,8 @@ All endpoints are prefixed with `/api/v1`. Full interactive docs at http://local
 | POST | `/auth/login` | Login (returns JWT access + refresh tokens) |
 | POST | `/auth/refresh` | Refresh access token |
 | GET | `/auth/me` | Current user profile |
-| GET | `/auth/users` | List all users (admin) |
-| PATCH | `/auth/users/{id}/role` | Change user role |
+| GET | `/auth/users` | Return the current workspace account only |
+| PATCH | `/auth/users/{id}/role` | Update only the current workspace account |
 
 ### CV Parsing
 | Method | Path | Description |

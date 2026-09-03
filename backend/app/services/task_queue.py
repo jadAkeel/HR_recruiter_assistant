@@ -13,12 +13,16 @@ logger = logging.getLogger(__name__)
 
 TASK_QUEUE_KEY = "task_queue:cvs"
 TASK_RESULT_PREFIX = "task_result:"
+TASK_OWNER_PREFIX = "task_owner:"
+TASK_OWNER_TTL_SECONDS = 24 * 60 * 60
+TASK_RESULT_TTL_SECONDS = 60 * 60
 
 ProcessFunc = Callable[..., Awaitable[dict[str, Any]]]
 
 # In-memory fallback when Redis is unavailable
 _in_memory_tasks: dict[str, dict[str, Any]] = {}
 _in_memory_results: dict[str, dict[str, Any]] = {}
+_in_memory_task_owners: dict[str, str] = {}
 
 
 async def enqueue_cv_processing(
@@ -32,6 +36,9 @@ async def enqueue_cv_processing(
     """
     Queues a CV processing task and returns its task ID.
     """
+    if settings.is_production and not created_by_user_id:
+        raise RuntimeError("CV processing tasks require an owner in production")
+
     task_id = task_id or str(uuid.uuid4())
     task = {
         "task_id": task_id,
@@ -44,40 +51,63 @@ async def enqueue_cv_processing(
     }
     r = await get_redis()
     if r:
+        if created_by_user_id:
+            await r.setex(
+                f"{TASK_OWNER_PREFIX}{task_id}",
+                TASK_OWNER_TTL_SECONDS,
+                created_by_user_id,
+            )
         await r.lpush(TASK_QUEUE_KEY, json.dumps(task))
     else:
         if settings.is_production:
             raise RuntimeError("Redis is required for CV task queueing in production")
         logger.warning("Redis not available, storing task in memory (will be lost on restart)")
         _in_memory_tasks[task_id] = task
+        if created_by_user_id:
+            _in_memory_task_owners[task_id] = created_by_user_id
     return task_id
 
 
-async def get_task_result(task_id: str) -> dict[str, Any] | None:
+async def get_task_result(task_id: str, owner_user_id: str) -> dict[str, Any] | None:
     """
     Returns the stored result for a queued CV task.
     """
     r = await get_redis()
     if r:
+        owner = await r.get(f"{TASK_OWNER_PREFIX}{task_id}")
+        if owner != owner_user_id:
+            return None
         result = await r.get(f"{TASK_RESULT_PREFIX}{task_id}")
         return json.loads(result) if result else None
+    if _in_memory_task_owners.get(task_id) != owner_user_id:
+        return None
     return _in_memory_results.get(task_id)
 
 
-async def get_task_results(task_ids: list[str]) -> dict[str, dict[str, Any]]:
+async def get_task_results(task_ids: list[str], owner_user_id: str) -> dict[str, dict[str, Any]]:
     """
     Returns several CV task results in one backend request.
     """
     r = await get_redis()
     if r:
-        keys = [f"{TASK_RESULT_PREFIX}{task_id}" for task_id in task_ids]
-        values = await r.mget(*keys)
+        owner_keys = [f"{TASK_OWNER_PREFIX}{task_id}" for task_id in task_ids]
+        result_keys = [f"{TASK_RESULT_PREFIX}{task_id}" for task_id in task_ids]
+        owners = await r.mget(*owner_keys)
+        values = await r.mget(*result_keys)
         return {
-            task_id: json.loads(value) if value else {"task_id": task_id, "status": "pending"}
-            for task_id, value in zip(task_ids, values)
+            task_id: (
+                json.loads(value)
+                if owner == owner_user_id and value
+                else {"task_id": task_id, "status": "pending"}
+            )
+            for task_id, owner, value in zip(task_ids, owners, values)
         }
     return {
-        task_id: _in_memory_results.get(task_id, {"task_id": task_id, "status": "pending"})
+        task_id: (
+            _in_memory_results.get(task_id, {"task_id": task_id, "status": "pending"})
+            if _in_memory_task_owners.get(task_id) == owner_user_id
+            else {"task_id": task_id, "status": "pending"}
+        )
         for task_id in task_ids
     }
 
@@ -142,10 +172,17 @@ async def run_cv_worker(process_func: ProcessFunc) -> None:
                 result["task_id"] = task_id
                 result["status"] = "completed"
 
-                await r.setex(f"{TASK_RESULT_PREFIX}{task_id}", 3600, json.dumps(result))
+                await r.setex(f"{TASK_RESULT_PREFIX}{task_id}", TASK_RESULT_TTL_SECONDS, json.dumps(result))
+                if task.get("created_by_user_id"):
+                    await r.setex(
+                        f"{TASK_OWNER_PREFIX}{task_id}",
+                        TASK_RESULT_TTL_SECONDS,
+                        task["created_by_user_id"],
+                    )
 
                 await r.publish("cv:notifications", json.dumps({
                     "type": "cv_processed",
+                    "created_by_user_id": task.get("created_by_user_id"),
                     "task_id": task_id,
                     "candidate_id": result.get("candidate_id"),
                     "full_name": result.get("full_name"),
@@ -158,11 +195,12 @@ async def run_cv_worker(process_func: ProcessFunc) -> None:
                 logger.error(f"CV task failed: {e}", extra={"task_id": task_id})
                 await r.setex(
                     f"{TASK_RESULT_PREFIX}{task_id}",
-                    3600,
+                    TASK_RESULT_TTL_SECONDS,
                     json.dumps({"task_id": task_id, "status": "failed", "error": str(e)}),
                 )
                 await r.publish("cv:notifications", json.dumps({
                     "type": "cv_failed",
+                    "created_by_user_id": task.get("created_by_user_id"),
                     "task_id": task_id,
                     "error": str(e),
                     "status": "failed",

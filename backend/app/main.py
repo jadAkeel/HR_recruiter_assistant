@@ -309,10 +309,16 @@ def create_app() -> FastAPI:
             requests=settings.rate_limit_requests,
             window_seconds=settings.rate_limit_window_seconds,
         )
+    cors_origin_regex = None
+    if not settings.is_production:
+        cors_origin_regex = (
+            r"https?://(.*\.ngrok-free\.(app|dev)|.*\.ngrok\.io|"
+            r".*\.onrender\.com|lhr\.life|localhost:\d+)"
+        )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_origin_regex=r"https?://(.*\.ngrok-free\.(app|dev)|.*\.ngrok\.io|.*\.onrender\.com|lhr\.life|localhost:\d+)",
+        allow_origin_regex=cors_origin_regex,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

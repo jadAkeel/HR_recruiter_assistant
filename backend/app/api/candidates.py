@@ -453,20 +453,20 @@ async def create_candidates_async_bulk(
 @router.get("/candidates/async/bulk")
 async def get_async_results_bulk(
     task_ids: list[str] = Query(...),
-    _: User = Depends(require_any_role("owner", "admin", "recruiter")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter")),
 ) -> dict[str, dict[str, Any]]:
     """
     Returns the status of many queued CV tasks in one request.
     """
     if not task_ids or len(task_ids) > 500:
         raise HTTPException(status_code=400, detail="Provide between 1 and 500 task IDs")
-    return await get_task_results(task_ids)
+    return await get_task_results(task_ids, current_user.id)
 
 
 @router.post("/candidates/async/bulk/status")
 async def get_async_results_bulk_status_post(
     body: dict[str, list[str]],
-    _: User = Depends(require_any_role("owner", "admin", "recruiter")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter")),
 ) -> dict[str, dict[str, Any]]:
     """
     Returns the status of many queued CV tasks via POST body.
@@ -474,19 +474,19 @@ async def get_async_results_bulk_status_post(
     task_ids = body.get("task_ids", [])
     if not task_ids or len(task_ids) > 500:
         raise HTTPException(status_code=400, detail="Provide between 1 and 500 task IDs")
-    return await get_task_results(task_ids)
+    return await get_task_results(task_ids, current_user.id)
 
 
 @router.get("/candidates/async/{task_id}")
 async def get_async_result(
     task_id: str,
-    _: User = Depends(require_any_role("owner", "admin", "recruiter", "candidate")),
+    current_user: User = Depends(require_any_role("owner", "admin", "recruiter", "candidate")),
 ) -> dict:
     """
     Returns the result of a queued candidate CV processing task.
     """
     from app.services.task_queue import get_task_result
-    result = await get_task_result(task_id)
+    result = await get_task_result(task_id, current_user.id)
     if result is None:
         return {"task_id": task_id, "status": "pending"}
     return result
@@ -668,7 +668,10 @@ async def get_my_candidate_profile(
     """
     Returns the candidate profile linked to the current user email.
     """
-    stmt = select(Candidate).where(Candidate.email == current_user.email)
+    stmt = select(Candidate).where(
+        Candidate.email == current_user.email,
+        Candidate.created_by_user_id == current_user.id,
+    )
     result = await session.execute(stmt)
     candidate = result.scalars().first()
     if candidate is None:

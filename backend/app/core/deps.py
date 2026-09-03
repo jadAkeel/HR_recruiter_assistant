@@ -5,6 +5,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db_session
+from app.core.config import settings
 from app.models.candidate import Candidate
 from app.models.user import User
 from app.services.auth import decode_token, get_user_by_id
@@ -18,9 +19,14 @@ STAFF_ROLES = {"owner", "admin", "recruiter"}
 
 def owned_resource_clause(model, user_id: str):
     """
-    Scopes resources to a user while allowing unowned legacy/fixture rows.
+    Scopes resources strictly to their owning user.
+
+    Legacy rows without an owner must be backfilled explicitly. Treating NULL
+    as shared would expose those rows to every account.
     """
-    return or_(model.created_by_user_id == user_id, model.created_by_user_id.is_(None))
+    if settings.allow_unowned_resources:
+        return or_(model.created_by_user_id == user_id, model.created_by_user_id.is_(None))
+    return model.created_by_user_id == user_id
 
 
 # Extract authenticated user from the Bearer token

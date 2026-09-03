@@ -20,7 +20,14 @@ jobs:
       - name: Ping backend health endpoint
         run: |
           curl --fail --show-error --silent \
-            --retry 3 \
+            --retry 2 \
+            --retry-all-errors \
             --retry-delay 10 \
-            --max-time 90 \
+            --retry-max-time 150 \
+            --max-time 60 \
             https://ai-recuriter-yoy5.onrender.com/api/v1/health
+      - name: Verify backend dependencies
+        run: |
+          curl --fail --show-error --silent \
+            --max-time 20 \
+            https://ai-recuriter-yoy5.onrender.com/api/v1/ready

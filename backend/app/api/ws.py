@@ -24,7 +24,7 @@ router = APIRouter()
 _webrtc_sessions: dict[str, dict[str, object]] = {}
 
 
-async def _authenticate_websocket(websocket: WebSocket) -> bool:
+async def _authenticate_websocket(websocket: WebSocket) -> str | None:
     """
     Authenticates a websocket connection using a bearer token.
     """
@@ -38,14 +38,21 @@ async def _authenticate_websocket(websocket: WebSocket) -> bool:
     user_id = payload.get("sub") if payload else None
     if payload is None or payload.get("type") != "access" or not isinstance(user_id, str):
         await websocket.close(code=1008)
-        return False
+        return None
 
     async with SessionLocal() as session:
         user = await get_user_by_id(session, user_id)
         if user is None:
             await websocket.close(code=1008)
-            return False
-    return True
+            return None
+    return user_id
+
+
+def _notification_for_user(data: dict, user_id: str) -> dict | None:
+    """Returns a tenant notification without its internal ownership field."""
+    if data.get("created_by_user_id") != user_id:
+        return None
+    return {key: value for key, value in data.items() if key != "created_by_user_id"}
 
 
 @router.websocket("/ws/cv-notifications")
@@ -54,7 +61,8 @@ async def cv_notifications(websocket: WebSocket):
     Streams CV processing task updates over websocket.
     """
     await websocket.accept()
-    if not await _authenticate_websocket(websocket):
+    user_id = await _authenticate_websocket(websocket)
+    if user_id is None:
         return
     logger.info("WebSocket connected")
 
@@ -76,7 +84,9 @@ async def cv_notifications(websocket: WebSocket):
                 except json.JSONDecodeError:
                     logger.warning("Invalid Redis notification payload")
                     continue
-                await websocket.send_json(data)
+                tenant_notification = _notification_for_user(data, user_id)
+                if tenant_notification is not None:
+                    await websocket.send_json(tenant_notification)
             else:
                 try:
                     await websocket.send_json({"type": "ping"})

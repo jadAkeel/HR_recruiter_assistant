@@ -98,7 +98,7 @@ export default function BulkUpload() {
         }
         uploaded = true;
         break;
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (isTransientError(err) && retry < 2) {
           await sleep(2000 * (retry + 1));
           continue;

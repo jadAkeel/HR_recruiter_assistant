@@ -330,7 +330,8 @@ def test_bulk_async_upload_queues_all_files_in_one_request(monkeypatch: pytest.M
         queued.append(task_id)
         return task_id
 
-    async def _fake_get_task_results(task_ids: list[str]):
+    async def _fake_get_task_results(task_ids: list[str], owner_user_id: str):
+        assert owner_user_id
         return {task_id: {"task_id": task_id, "status": "queued"} for task_id in task_ids}
 
     from app.api import candidates as candidates_api
