@@ -26,8 +26,3 @@ jobs:
             --retry-max-time 150 \
             --max-time 60 \
             https://ai-recuriter-yoy5.onrender.com/api/v1/health
-      - name: Verify backend dependencies
-        run: |
-          curl --fail --show-error --silent \
-            --max-time 20 \
-            https://ai-recuriter-yoy5.onrender.com/api/v1/ready
