@@ -6,7 +6,9 @@ This runbook covers the minimum paid-pilot operating procedures for the AI Hirin
 
 - Run migrations before the API starts: `RUN_MIGRATIONS=true` on the `api` service.
 - Keep `RUN_CV_WORKER_IN_API=false` in production and run `python -m app.worker` as the dedicated worker service.
-- The API healthcheck must call `/api/v1/ready`, not `/api/v1/health`.
+- The Render load-balancer healthcheck must call `/api/v1/health`. Use
+  `/api/v1/ready` as a separate operational check for database, Redis,
+  embeddings, and the configured LLM provider.
 - Ollama must have these models before the API is ready: `OLLAMA_MODEL`, `OLLAMA_INTERVIEW_MODEL`, `OLLAMA_PARSING_MODEL`, `OLLAMA_EMBEDDING_MODEL`.
 
 ## Backfill After Upgrade

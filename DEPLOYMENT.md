@@ -35,15 +35,17 @@ The changes have been pushed to your GitHub repository:
    - الخدمة الخلفية FastAPI Backend.
    - واجهة المستخدم الثابتة Vite React Frontend.
 
-The backend Blueprint uses the lightweight `/api/v1/health` endpoint for
-Render's five-second HTTP probe. Application startup already requires PostgreSQL
-and Redis, while the external keep-alive workflow additionally verifies the
-deeper `/api/v1/ready` endpoint. In production, CORS accepts only the frontend
-URL configured through `CORS_ORIGINS_STR`.
+The backend Blueprint and external keep-alive workflow use the lightweight
+`/api/v1/health` endpoint so the web service can stay awake independently of
+optional AI-provider availability. Check the deeper `/api/v1/ready` endpoint
+separately when validating PostgreSQL, Redis, embeddings, and the configured
+LLM provider. In production, CORS accepts only the frontend URL configured
+through `CORS_ORIGINS_STR`.
 
-يستخدم الـBackend المسار السريع `/api/v1/health` لفحص Render القصير. ويتطلب
-تشغيل التطبيق مسبقاً توفر PostgreSQL وRedis، كما يفحص GitHub workflow المسار
-الأعمق `/api/v1/ready`. وفي الإنتاج، يقبل CORS فقط رابط الواجهة المضبوط في
+يستخدم الـBackend وGitHub workflow المسار السريع `/api/v1/health` كي تبقى
+الخدمة مستيقظة بشكل مستقل عن توفّر مزوّد الـAI. افحص المسار الأعمق
+`/api/v1/ready` بشكل منفصل عند التحقق من PostgreSQL وRedis والـembeddings
+ومزوّد الـLLM المضبوط. وفي الإنتاج، يقبل CORS فقط رابط الواجهة المضبوط في
 `CORS_ORIGINS_STR`.
 
 ---
