@@ -62,5 +62,8 @@ audit_report.json
 # Uploads
 uploads/
 
+# Windows shortcuts
+*.lnk
+
 # HuggingFace model cache (Render build)
 backend/.hf_cache/
