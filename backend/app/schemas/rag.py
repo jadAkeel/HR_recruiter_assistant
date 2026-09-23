@@ -8,6 +8,9 @@ class IngestRequest(BaseModel):
     content: str = Field(min_length=1, max_length=50000)
     category: str = Field(default="general", min_length=1, max_length=50)
     tags: list[str] = Field(default_factory=list)
+    # Optional RAG enrichment evidence for category="skill" documents.
+    indicators: list[str] = Field(default_factory=list, max_length=100)
+    not_sufficient: list[str] = Field(default_factory=list, max_length=100)
 
 
 class IngestResponse(BaseModel):
