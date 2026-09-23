@@ -36,8 +36,18 @@ async def health_embeddings():
     Returns embedding provider status and checks if embeddings are real or mock fallbacks.
     """
     from app.core.config import settings
+    from app.services.embedding import embedding_runtime_status
+
     provider = settings.embedding_provider.lower()
-    is_real = provider != "hash"
+    # Only models that have been loaded appear here; any of them on the hash fallback
+    # means vectors are not real even though a real provider is configured.
+    runtime = {
+        model: status
+        for model, status in embedding_runtime_status().items()
+        if status["configured_provider"] == provider
+    }
+    fallback_models = sorted(model for model, status in runtime.items() if status["active_provider"] != provider)
+    is_real = provider != "hash" and not fallback_models
     return {
         "status": "ok",
         "provider": provider,
@@ -47,6 +57,8 @@ async def health_embeddings():
         "dimension": settings.embedding_dimension,
         "use_multilingual_embedding": settings.use_multilingual_embedding,
         "auto_detect_lang": settings.auto_detect_lang,
-        "is_fallback": provider == "hash",
+        "is_fallback": not is_real,
+        "fallback_models": fallback_models,
+        "loaded_models": runtime,
     }
 

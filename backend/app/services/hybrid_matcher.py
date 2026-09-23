@@ -28,6 +28,7 @@ from app.services.embedding import (
     embedding_metadata_for_text,
     get_embedding_service,
     is_embedding_quality_text,
+    is_hash_fallback_vector,
     validate_embedding_vector,
 )
 from app.services.skill_catalog import (
@@ -1621,6 +1622,9 @@ class HybridMatchingEngine:
                 ):
                     return None
                 validate_embedding_vector(row.embedding_json)
+                if row.provider != "hash" and is_hash_fallback_vector(row.embedding_json, row.source_hash):
+                    # Saved while the hash fallback was silently active; recompute it.
+                    return None
                 return row.embedding_json
             return None
         except Exception:

@@ -8,7 +8,7 @@ import httpx
 from app.core.config import settings
 from app.core.db import check_db_connection
 from app.core.redis import get_redis
-from app.services.embedding import get_embedding_service
+from app.services.embedding import embedding_runtime_status, get_embedding_service
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,27 @@ async def _check_embedding_provider() -> dict[str, Any]:
     except Exception as exc:
         logger.warning("Embedding readiness check failed", extra={"error_type": type(exc).__name__})
         return _result(False, "embedding provider failed", provider=provider, error_type=type(exc).__name__)
-    return _result(True, "embedding provider reachable", provider=provider)
+
+    # The embed call above succeeds even when the hash fallback answered it, so
+    # report which provider is really serving each model.
+    models = {
+        model: status
+        for model, status in embedding_runtime_status().items()
+        if status["configured_provider"] == provider
+    }
+    fallbacks = {model: status for model, status in models.items() if status["active_provider"] != provider}
+    extra: dict[str, Any] = {"provider": provider, "models": models}
+
+    if fallbacks:
+        extra["fallback_provider"] = "hash"
+        extra["fallback_models"] = fallbacks
+        names = ", ".join(sorted(fallbacks))
+        return _result(
+            False,
+            f"{provider} unavailable for {names}; serving hash fallback (semantic scores are not meaningful)",
+            **extra,
+        )
+    return _result(True, "embedding provider loaded", active_provider=provider, **extra)
 
 
 async def collect_readiness() -> dict[str, Any]:

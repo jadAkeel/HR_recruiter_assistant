@@ -4,7 +4,6 @@ import functools
 import hashlib
 import logging
 import math
-import os
 from collections import OrderedDict
 from typing import Any, Protocol
 
@@ -58,10 +57,10 @@ class LocalEmbeddingService:
         """
         Initializes the local sentence-transformer embedding model.
         """
-        os.environ.setdefault("USE_TF", "0")
-        os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+        # USE_TF / TRANSFORMERS_NO_TF are set in app/__init__.py, before stanza imports transformers.
         from sentence_transformers import SentenceTransformer
         self.model = SentenceTransformer(model_name)
+        logger.info("Loaded sentence-transformers model %s", model_name)
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """
@@ -83,16 +82,21 @@ class DevelopmentFallbackEmbedding:
         if settings.is_production:
             raise RuntimeError("DevelopmentFallbackEmbedding (hash provider) cannot be used in a production environment.")
         self.dimension = dimension or settings.embedding_dimension
-        logger.warning(
-            "WARNING: Using DevelopmentFallbackEmbedding — semantic scores ZERO. "
-            "Set EMBEDDING_PROVIDER=sentence-transformers in production."
-        )
+        self._warned = False
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """
         Returns embeddings for a batch of input texts.
         """
         import asyncio
+        if not self._warned:
+            # Warn on first use, not construction: FallbackEmbeddingService builds
+            # this as a standby even when the real model is working.
+            self._warned = True
+            logger.warning(
+                "WARNING: Using DevelopmentFallbackEmbedding — semantic scores ZERO. "
+                "Set EMBEDDING_PROVIDER=sentence-transformers in production."
+            )
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._embed_sync, texts)
 
@@ -154,22 +158,34 @@ class OllamaEmbeddingService:
 class FallbackEmbeddingService:
     """Falls back to deterministic hash embeddings when the primary provider fails."""
 
-    def __init__(self, primary: EmbeddingProvider, fallback: EmbeddingProvider | None = None) -> None:
+    def __init__(
+        self,
+        primary: EmbeddingProvider,
+        fallback: EmbeddingProvider | None = None,
+        *,
+        provider: str | None = None,
+        model_name: str | None = None,
+    ) -> None:
         """
         Initializes primary and fallback embedding providers.
         """
         self._primary = primary
         self._fallback = fallback or DevelopmentFallbackEmbedding()
+        self._provider = provider
+        self._model_name = model_name
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """
         Returns embeddings for a batch of input texts.
         """
         try:
-            return _validate_embedding_batch(
+            vectors = _validate_embedding_batch(
                 await self._primary.embed(texts),
                 expected_count=len(texts),
             )
+            if self._model_name and self._provider:
+                _record_runtime_status(self._model_name, self._provider, self._provider)
+            return vectors
         except Exception as exc:
             if settings.is_production:
                 logger.error(
@@ -181,6 +197,13 @@ class FallbackEmbeddingService:
                 "Embedding provider failed; using deterministic fallback",
                 extra={"error_type": type(exc).__name__},
             )
+            if self._model_name and self._provider:
+                _record_runtime_status(
+                    self._model_name,
+                    self._provider,
+                    "hash",
+                    f"{type(exc).__name__}: {exc}",
+                )
             return _validate_embedding_batch(
                 await self._fallback.embed(texts),
                 expected_count=len(texts),
@@ -254,6 +277,24 @@ class CachedEmbeddingService:
         self._cache.clear()
 
 
+def is_hash_fallback_vector(embedding: list[float], source_hash: str | None) -> bool:
+    """
+    Detects a stored vector produced by DevelopmentFallbackEmbedding. Its seed comes
+    from the source-text hash, so it can be regenerated and compared. This catches
+    vectors saved with a real provider label while the fallback was silently active.
+    """
+    if not source_hash or not embedding:
+        return False
+    try:
+        seed = int.from_bytes(bytes.fromhex(source_hash)[:8], "big", signed=False)
+    except ValueError:
+        return False
+    stored = np.asarray(embedding, dtype=np.float64)
+    expected = np.random.default_rng(seed).standard_normal(len(stored))
+    expected = expected / np.linalg.norm(expected)
+    return bool(np.allclose(stored, expected, atol=1e-6))
+
+
 def _validate_embedding_batch(embeddings: list[list[float]], expected_count: int) -> list[list[float]]:
     """
     Validates the number and shape of returned embedding vectors.
@@ -313,6 +354,43 @@ def embedding_dimension_for_text(text: str | None = None) -> int:
     return settings.embedding_dimension
 
 
+# Model name -> which provider is really serving it. Readiness and embedding
+# metadata read this so a silent hash fallback is visible instead of reported as ok.
+_runtime_status: dict[str, dict[str, Any]] = {}
+
+
+def _record_runtime_status(
+    model_name: str,
+    configured_provider: str,
+    active_provider: str,
+    fallback_reason: str | None = None,
+) -> None:
+    """
+    Records which provider is actually producing vectors for a model.
+    """
+    previous = _runtime_status.get(model_name)
+    _runtime_status[model_name] = {
+        "configured_provider": configured_provider,
+        "active_provider": active_provider,
+        "fallback_reason": fallback_reason[:300] if fallback_reason else None,
+    }
+    if active_provider != configured_provider and (previous or {}).get("active_provider") != active_provider:
+        logger.warning(
+            "Embedding model %s is served by the %s fallback instead of %s: %s",
+            model_name,
+            active_provider,
+            configured_provider,
+            fallback_reason,
+        )
+
+
+def embedding_runtime_status() -> dict[str, dict[str, Any]]:
+    """
+    Returns a snapshot of which provider serves each loaded embedding model.
+    """
+    return {model: dict(status) for model, status in _runtime_status.items()}
+
+
 def embedding_model_name_for_provider(provider: str | None = None, text: str | None = None) -> str:
     """
     Returns the model name used by the selected embedding provider.
@@ -332,6 +410,12 @@ def embedding_metadata_for_text(text: str, provider: str | None = None) -> dict[
     Builds metadata that ties an embedding to its provider, model, and source text.
     """
     selected = (provider or settings.embedding_provider).lower()
+    if provider is None and selected != "hash":
+        # Label vectors produced by the hash fallback as hash, so they are never
+        # reused as real semantic vectors once the configured model loads again.
+        status = _runtime_status.get(embedding_model_name_for_provider(selected, text))
+        if status and status["configured_provider"] == selected and status["active_provider"] == "hash":
+            selected = "hash"
     lang = detect_language(text) or "en"
     return {
         "provider": selected,
@@ -397,21 +481,28 @@ def _get_cached_embedding_service(provider: str, model_name: str, dimension: int
         inner = primary if settings.is_production else FallbackEmbeddingService(
             primary,
             DevelopmentFallbackEmbedding(dimension=dimension),
+            provider=provider,
+            model_name=settings.ollama_embedding_model,
         )
     else:
         if settings.is_production:
             inner = LocalEmbeddingService(model_name)
+            _record_runtime_status(model_name, provider, provider)
         else:
             try:
                 inner = FallbackEmbeddingService(
                     LocalEmbeddingService(model_name),
                     DevelopmentFallbackEmbedding(dimension=dimension),
+                    provider=provider,
+                    model_name=model_name,
                 )
+                _record_runtime_status(model_name, provider, provider)
             except Exception as exc:
                 logger.warning(
                     f"Local embedding provider ({model_name}) unavailable; using deterministic fallback",
                     extra={"error_type": type(exc).__name__},
                 )
+                _record_runtime_status(model_name, provider, "hash", f"{type(exc).__name__}: {exc}")
                 inner = DevelopmentFallbackEmbedding(dimension=dimension)
     return CachedEmbeddingService(inner)
 
@@ -449,10 +540,18 @@ def get_standard_embedding_service() -> EmbeddingProvider:
     return _get_cached_embedding_service(provider, model_name, settings.embedding_dimension)
 
 
+def _clear_embedding_services() -> None:
+    """
+    Drops cached embedding services and the runtime status recorded for them.
+    """
+    _get_cached_embedding_service.cache_clear()
+    _runtime_status.clear()
+
+
 # Attach cache_clear for backward compatibility with tests and callers
-get_embedding_service.cache_clear = _get_cached_embedding_service.cache_clear
-get_multilingual_embedding_service.cache_clear = _get_cached_embedding_service.cache_clear
-get_standard_embedding_service.cache_clear = _get_cached_embedding_service.cache_clear
+get_embedding_service.cache_clear = _clear_embedding_services
+get_multilingual_embedding_service.cache_clear = _clear_embedding_services
+get_standard_embedding_service.cache_clear = _clear_embedding_services
 
 
 # Export HashEmbeddingService as an alias for backward compatibility

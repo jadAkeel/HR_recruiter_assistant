@@ -66,6 +66,29 @@ async def _keep_alive_worker() -> None:
             await asyncio.sleep(interval)
 
 
+async def _warm_embedding_model() -> None:
+    """
+    Loads the local embedding model at startup, off the event loop, so the first
+    request is fast and a model that cannot load is reported in the startup log.
+    """
+    if settings.embedding_provider != "sentence-transformers":
+        return
+    from app.services.embedding import (
+        embedding_runtime_status,
+        get_multilingual_embedding_service,
+        get_standard_embedding_service,
+    )
+
+    loader = get_multilingual_embedding_service if settings.use_multilingual_embedding else get_standard_embedding_service
+    try:
+        await asyncio.to_thread(loader)
+    except Exception:
+        logger.exception("Embedding model failed to load at startup")
+        return
+    for model, status in embedding_runtime_status().items():
+        logger.info("Embedding model %s served by %s", model, status["active_provider"])
+
+
 async def _ensure_initial_owner() -> None:
     """
     Ensures a configured owner account exists before serving requests.
@@ -258,6 +281,7 @@ async def lifespan(_: FastAPI):
         if settings.is_production and await get_redis() is None:
             raise RuntimeError("Redis is required for production CV task queueing")
         logger.info("Embedding provider: %s", settings.embedding_provider)
+        await _warm_embedding_model()
         worker_task = asyncio.create_task(_cv_worker()) if settings.run_cv_worker_in_api else None
         keep_alive_task = asyncio.create_task(_keep_alive_worker()) if _should_run_keep_alive() else None
         if worker_task is None:
