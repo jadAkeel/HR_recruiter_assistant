@@ -8,14 +8,26 @@ from app.services.skill_catalog import SKILL_KEYWORDS, extract_catalog_skills, n
 
 logger = logging.getLogger(__name__)
 
-REQUIREMENT_HEADERS = re.compile(r"^(requirements|must have|required skills|required qualifications|minimum qualifications)\b", re.IGNORECASE)
-OPTIONAL_HEADERS = re.compile(r"^(nice to have|preferred|bonus|preferred qualifications|desirable)\b", re.IGNORECASE)
+_REQUIRED_KEYWORDS = (
+    r"requirements|required skills|required qualifications|required|must[- ]have|minimum qualifications"
+)
+_OPTIONAL_KEYWORDS = (
+    r"nice[- ]to[- ]have|good to have|preferred qualifications|preferred|bonus|desirable"
+)
+_OTHER_SECTION_KEYWORDS = r"responsibilities|about|benefits|overview|summary"
+
+REQUIREMENT_HEADERS = re.compile(rf"^({_REQUIRED_KEYWORDS})\b", re.IGNORECASE)
+OPTIONAL_HEADERS = re.compile(rf"^({_OPTIONAL_KEYWORDS})\b", re.IGNORECASE)
 SECTION_BOUNDARY_HEADERS = re.compile(
-    r"^(requirements|must have|required skills|required qualifications|minimum qualifications|"
-    r"nice to have|preferred|bonus|preferred qualifications|desirable|responsibilities|"
-    r"about|benefits|overview|summary)\b",
+    rf"^({_REQUIRED_KEYWORDS}|{_OPTIONAL_KEYWORDS}|{_OTHER_SECTION_KEYWORDS})\b",
     re.IGNORECASE,
 )
+# "Keyword:" mid-paragraph starts a new section, e.g. "Backend Developer Requirements: Python".
+INLINE_HEADER_SPLIT = re.compile(
+    rf"(?=\b(?:{_REQUIRED_KEYWORDS}|{_OPTIONAL_KEYWORDS}|{_OTHER_SECTION_KEYWORDS})\s*:)",
+    re.IGNORECASE,
+)
+MAX_TITLE_LENGTH = 120
 SENIORITY_PATTERNS = {
     "junior": re.compile(r"\b(junior|entry level|associate)\b", re.IGNORECASE),
     "mid": re.compile(r"\b(mid|intermediate)\b", re.IGNORECASE),
@@ -24,9 +36,11 @@ SENIORITY_PATTERNS = {
 
 
 BONUS_PHRASE_PATTERN = re.compile(
-    r"(is a plus|nice to have|preferred|bonus|plus|good to have|desirable|advantage)",
+    r"\b(is a plus|nice[- ]to[- ]have|preferred|bonus|plus|good to have|desirable|advantage)",
     re.IGNORECASE,
 )
+# Sentence boundary: punctuation followed by whitespace, so "node.js" or "3.5" stay intact.
+CLAUSE_SPLIT_PATTERN = re.compile(r"(?<=[.;!?])\s+")
 
 
 def parse_job_description(text: str) -> JobProfile:
@@ -68,26 +82,52 @@ def parse_job_description(text: str) -> JobProfile:
 
 def _extract_bonus_skills(text: str) -> set[str]:
     """
-    Extracts skills from lines marked as bonus or preferred.
+    Extracts skills from sentences marked as bonus or preferred, so a single-paragraph
+    description does not turn its required skills into optional ones.
     """
-    lines = text.splitlines()
     bonus_skills: set[str] = set()
-    for line in lines:
-        if BONUS_PHRASE_PATTERN.search(line):
-            line_normalized = _normalize_text(line)
+    for segment in _segments(text):
+        if segment and BONUS_PHRASE_PATTERN.search(segment):
+            segment_normalized = _normalize_text(segment)
             for skill in SKILL_KEYWORDS:
-                if skill_in_text(skill, line_normalized):
+                if skill_in_text(skill, segment_normalized):
                     bonus_skills.add(skill)
     return bonus_skills
 
 
+def _segments(text: str) -> list[str]:
+    """
+    Splits a job description into sentence-level segments, starting a new segment at
+    every sentence boundary and inline "Header:" keyword. Blank lines become "" so
+    they still end a section.
+    """
+    segments: list[str] = []
+    for line in text.splitlines():
+        if not line.strip():
+            segments.append("")
+            continue
+        for clause in CLAUSE_SPLIT_PATTERN.split(line):
+            for piece in INLINE_HEADER_SPLIT.split(clause):
+                piece = piece.strip()
+                if piece:
+                    segments.append(piece)
+    return segments
+
+
 def _extract_title(text: str) -> str | None:
     """
-    Uses the first non-empty line as the likely job title.
+    Uses the first sentence of the description as the likely job title, stopping at
+    any section header so a one-paragraph description does not become the title.
     """
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    if lines:
-        return lines[0][:120]
+    for segment in _segments(text):
+        if not segment:
+            continue
+        if SECTION_BOUNDARY_HEADERS.search(segment):
+            return None
+        title = segment.rstrip(" .;:!?-").strip()
+        if len(title) > MAX_TITLE_LENGTH:
+            title = title[:MAX_TITLE_LENGTH].rsplit(" ", 1)[0].rstrip(" ,;:-")
+        return title or None
     return None
 
 
@@ -109,10 +149,9 @@ def _extract_section_skills(text: str, header_pattern: re.Pattern[str]) -> list[
     """
     Extracts skills from a labeled job description section.
     """
-    lines = [line.strip() for line in text.splitlines()]
     in_section = False
     collected: list[str] = []
-    for line in lines:
+    for line in _segments(text):
         if header_pattern.search(line):
             in_section = True
             remainder = header_pattern.sub("", line, count=1).strip(" :-")

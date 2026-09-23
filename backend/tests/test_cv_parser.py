@@ -136,6 +136,70 @@ def test_parsers_extract_symbol_skills() -> None:
         assert skill in job.required_skills
 
 
+def test_single_paragraph_job_keeps_required_skills_out_of_bonus() -> None:
+    """
+    Checks that a bonus phrase only marks skills in its own sentence as optional.
+    """
+    job = parse_job_description(
+        "Junior Backend Developer. Required: Python, FastAPI, SQL, Git. Nice to have: Docker, Redis."
+    )
+    assert {"python", "fastapi", "sql", "git"}.issubset(set(job.required_skills))
+    assert {"docker", "redis"}.issubset(set(job.optional_skills))
+
+    job = parse_job_description("We need a Python and Django developer; Docker is a plus.")
+    assert {"python", "django"}.issubset(set(job.required_skills))
+    assert job.optional_skills == ["docker"]
+
+
+def test_inline_headers_mid_paragraph_start_sections() -> None:
+    """
+    Checks that "Requirements:" / "Nice to have:" inside a paragraph are treated as
+    section headers even without a preceding sentence break.
+    """
+    job = parse_job_description("Backend Developer Requirements: Python, PostgreSQL. Nice to have: Kubernetes.")
+    assert set(job.required_skills) == {"python", "postgresql"}
+    assert job.optional_skills == ["kubernetes"]
+
+    job = parse_job_description("Requirements: Java, Spring. Preferred: AWS.")
+    assert set(job.required_skills) == {"java", "spring"}
+    assert job.optional_skills == ["aws"]
+
+
+def test_multiline_sections_still_parse_after_sentence_split() -> None:
+    """
+    Checks that classic header-per-line descriptions keep their sections.
+    """
+    job = parse_job_description("Senior Data Engineer\nRequirements\n- Python\n- SQL\n\nNice to have\n- Airflow")
+    assert set(job.required_skills) == {"python", "sql"}
+    assert job.optional_skills == ["airflow"]
+    assert job.title == "Senior Data Engineer"
+
+
+def test_job_title_stops_at_first_sentence_or_header() -> None:
+    """
+    Checks that a one-paragraph description yields a short title, not the paragraph.
+    """
+    paragraph = "Junior Backend Developer. Required: Python, FastAPI, SQL, Git. Nice to have: Docker, Redis."
+    assert parse_job_description(paragraph).title == "Junior Backend Developer"
+    assert parse_job_description("Backend Developer Requirements: Python.").title == "Backend Developer"
+    assert parse_job_description("Requirements: Java, Spring.").title is None
+
+    long_sentence = "Node.js developer " + "building reliable REST APIs " * 10
+    title = parse_job_description(long_sentence).title
+    assert title is not None and len(title) <= 120
+    assert title.startswith("Node.js developer building")
+    assert not title.endswith(" ")
+
+
+def test_bonus_phrase_needs_word_start() -> None:
+    """
+    Checks that words like "surplus" do not mark a sentence as optional.
+    """
+    job = parse_job_description("C++ engineer with a surplus of energy. Python is a plus.")
+    assert job.required_skills == ["c++"]
+    assert job.optional_skills == ["python"]
+
+
 def test_catalog_aliases_normalize_to_canonical_names() -> None:
     """
     Checks that catalog aliases normalize to canonical names.
