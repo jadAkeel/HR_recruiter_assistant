@@ -315,8 +315,8 @@ async def test_single_indicator_threshold_rule(monkeypatch, similarity, expected
     monkeypatch.setattr(settings, "rag_chunk_similarity_threshold", 0.34)
     engine = _engine(NLP)
 
-    async def fake_best_chunk(entry, evidence):
-        return evidence.chunks[0], similarity
+    async def fake_best_chunk(entry, evidence, chunk_indices):
+        return evidence.chunks[chunk_indices[0]], similarity
 
     monkeypatch.setattr(engine, "_rag_best_chunk", fake_best_chunk)
     result = await _enrich(engine, "nlp", _candidate("Built a text classification service for emails."))
@@ -324,6 +324,37 @@ async def test_single_indicator_threshold_rule(monkeypatch, similarity, expected
     if expected:
         assert result.rag_evidence["nlp"]["similarity"] == pytest.approx(similarity)
         assert result.rag_evidence["nlp"]["rule"].startswith("1 indicator")
+
+
+class _StubEmbedder:
+    """Maps the definition and chunks mentioning 'deployment' to one axis, everything else to another."""
+
+    async def embed(self, texts):
+        vectors = []
+        for text in texts:
+            on_topic = text == DEVOPS.definition or "deployment" in text.lower()
+            vectors.append([1.0, 0.0] + [0.0] * 382 if on_topic else [0.0, 1.0] + [0.0] * 382)
+        return vectors
+
+
+@pytest.mark.asyncio
+async def test_semantic_evidence_comes_from_the_indicator_chunk_only(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "embedding_provider", "sentence-transformers")
+    monkeypatch.setattr(settings, "rag_chunk_similarity_threshold", 0.34)
+    engine = _engine(DEVOPS)
+    engine.embedder = _StubEmbedder()
+
+    # An unrelated line that happens to match the definition must not rescue a lone indicator.
+    off_topic = _candidate("Used Jenkins to email a nightly report.\nDocumented deployment steps for the team.")
+    result = await _enrich(engine, "devops", off_topic)
+    assert result.rag_enriched_skills == []
+    assert result.rag_rejected["devops"]["similarity"] == pytest.approx(0.0)
+
+    on_topic = _candidate("Automated deployment of services with Jenkins.\nEnjoys hiking.")
+    result = await _enrich(engine, "devops", on_topic)
+    assert result.rag_enriched_skills == ["devops"]
+    assert result.rag_evidence["devops"]["best_chunk"] == "Automated deployment of services with Jenkins."
+    assert result.rag_evidence["devops"]["similarity"] == pytest.approx(1.0)
 
 
 @pytest.mark.asyncio

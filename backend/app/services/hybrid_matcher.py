@@ -1102,7 +1102,8 @@ class HybridMatchingEngine:
                 still_missing.append(skill)
                 continue
 
-            best_chunk, similarity = await self._rag_best_chunk(entry, evidence)
+            chunk_indices = list(dict.fromkeys(index for _, index in found.values() if index >= 0))
+            best_chunk, similarity = await self._rag_best_chunk(entry, evidence, chunk_indices)
             rounded_similarity = round(similarity, 4) if similarity is not None else None
             if len(found) >= min_indicators:
                 rule = f">= {min_indicators} distinct indicators"
@@ -1122,7 +1123,6 @@ class HybridMatchingEngine:
                 still_missing.append(skill)
                 continue
 
-            chunk_indices = list(dict.fromkeys(index for _, index in found.values() if index >= 0))
             indicator_chunks = [evidence.chunks[index] for index in chunk_indices]
             result.matched_required.append(SkillMatch(skill=skill, match_type="rag", confidence=confidence))
             result.rag_matched_count += 1
@@ -1249,11 +1249,21 @@ class HybridMatchingEngine:
                 found[canonical] = (indicator, -1)
         return found
 
-    async def _rag_best_chunk(self, entry: Any, evidence: _RagCandidateEvidence) -> tuple[str | None, float | None]:
+    async def _rag_best_chunk(
+        self,
+        entry: Any,
+        evidence: _RagCandidateEvidence,
+        chunk_indices: list[int],
+    ) -> tuple[str | None, float | None]:
         """
-        Returns the candidate chunk most similar to the skill definition (max cosine).
+        Returns the indicator-bearing chunk most similar to the skill definition (max cosine).
+
+        Only chunks that contain a found indicator are scored: the max over every
+        chunk of a real CV (~100 lines) lands near 0.37 with MiniLM from generic
+        lines alone ("passionate about solving complex problems"), which would
+        turn "1 indicator + semantic" into "1 indicator".
         """
-        if settings.embedding_provider.lower() == "hash" or not evidence.chunks:
+        if settings.embedding_provider.lower() == "hash" or not chunk_indices:
             return None, None
         if not evidence.embedding_attempted:
             evidence.embedding_attempted = True
@@ -1267,7 +1277,7 @@ class HybridMatchingEngine:
 
         import numpy as np
 
-        indices = [i for i, vector in enumerate(evidence.embeddings) if len(vector) == len(definition_vector)]
+        indices = [i for i in chunk_indices if len(evidence.embeddings[i]) == len(definition_vector)]
         if not indices:
             return None, None
         matrix = np.asarray([evidence.embeddings[i] for i in indices], dtype=np.float32)

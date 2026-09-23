@@ -112,7 +112,7 @@ An AI-powered recruitment automation platform that covers the entire hiring life
 - **Semantic Similarity** — cosine similarity between job and candidate embeddings (sentence-transformers or Ollama)
 - **Cross-Encoder Reranking** — Ollama LLM reranks top candidates with bounded score adjustment
 - **Structured Scoring** — experience years, seniority fit, education level
-- **RAG Enrichment** — knowledge base lookups for skill definitions
+- **RAG Enrichment** — capped partial credit (0.60) for missing umbrella skills (NLP, DevOps, …) proven by concrete indicators from `backend/data/skill_knowledge.json`; the matched indicators and best evidence sentence are recorded in `rag_evidence`. Benchmark with `python scripts/benchmark_rag_enrichment.py`
 - **Feedback Integration** — historical recruiter acceptance/rejection affects future matches
 - **Explainable Scores** — transparent breakdown of every scoring component with reasoning trace
 
@@ -322,7 +322,7 @@ All endpoints are prefixed with `/api/v1`. Full interactive docs at http://local
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/rag/ingest` | Add knowledge document |
-| POST | `/rag/seed` | Seed built-in knowledge base |
+| POST | `/rag/seed` | Sync built-in knowledge base (idempotent; also runs in the background on startup unless `RAG_AUTO_SEED=false`) |
 | POST | `/rag/query` | Query knowledge base semantically |
 
 ### ESCO
