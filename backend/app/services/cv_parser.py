@@ -8,7 +8,8 @@ from typing import Iterable
 import pdfplumber
 from docx import Document
 from app.schemas.candidate import CandidateProfile
-from app.services.skill_catalog import extract_catalog_skills, normalize_text_for_skill_matching
+from app.services.skill_catalog import extract_catalog_skills, normalize_skill_name, normalize_text_for_skill_matching
+from app.services.skill_status import NONE, assess_cv_text, to_profile_fields
 from app.services.stanza_nlp import ParsedText, parse_text_with_stanza
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,14 @@ def parse_cv_text(text: str) -> CandidateProfile:
     normalized = _normalize_text(text)
     parsed_text = parse_text_with_stanza(text)
     skills = _extract_skills(normalized)
+    # Rule-based HAS/WEAK/LEARNING/NONE per skill; the LLM pass runs later in the background.
+    statuses = assess_cv_text(text, skills)
+    status_fields = to_profile_fields(statuses)
+    # Statuses are keyed by normalized name (e.g. "milvus" -> "vector database").
+    skills = [
+        skill for skill in skills
+        if getattr(statuses.get(normalize_skill_name(skill)), "status", None) != NONE
+    ]
     sections = _extract_sections(text, parsed_text)
 
     full_name = _extract_name(text)
@@ -85,6 +94,9 @@ def parse_cv_text(text: str) -> CandidateProfile:
         phone=phone,
         location=location,
         skills=skills,
+        skills_detailed=status_fields["skills_detailed"],
+        negative_skills=status_fields["negative_skills"],
+        learning_skills=status_fields["learning_skills"],
         experience=sections.get("experience", []),
         education=sections.get("education", []),
         projects=sections.get("projects", []),
