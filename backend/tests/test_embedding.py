@@ -258,3 +258,14 @@ def test_matcher_ignores_cached_hash_vector_labelled_as_real(monkeypatch) -> Non
 
     row.embedding_json = [1.0] + [0.0] * 383
     assert asyncio.run(matcher._get_cached_embedding(store, SimpleNamespace(id="candidate-1"))) == row.embedding_json
+
+
+def test_multilingual_dimension_matches_configured_model() -> None:
+    """
+    Checks that the Arabic route uses the multilingual model's real dimension, which
+    for paraphrase-multilingual-MiniLM-L12-v2 is 384 (the pgvector column size).
+    """
+    assert embedding.settings.multilingual_embedding_dimension == 384
+    assert embedding.embedding_dimension_for_text("مهندس بايثون") == embedding.settings.multilingual_embedding_dimension
+    vector = embedding.DevelopmentFallbackEmbedding()._embed_sync(["مهندس بايثون"])[0]
+    assert len(vector) == embedding.settings.multilingual_embedding_dimension

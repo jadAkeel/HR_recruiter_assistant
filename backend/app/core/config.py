@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     multilingual_embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     embedding_dimension: int = 384
+    # paraphrase-multilingual-MiniLM-L12-v2 outputs 384 dims; change with the model.
+    multilingual_embedding_dimension: int = 384
     use_multilingual_embedding: bool = False
     auto_detect_lang: bool = True
     # Download missing HuggingFace models (embeddings, faster-whisper) on first use.

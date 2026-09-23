@@ -107,6 +107,7 @@ def test_arabic_text_falls_back_when_multilingual_model_is_missing(
     monkeypatch.setattr(embedding.settings, "auto_detect_lang", True)
     monkeypatch.setattr(embedding.settings, "use_multilingual_embedding", False)
     monkeypatch.setattr(model_cache.settings, "allow_model_download", False)
+    monkeypatch.setattr(embedding.settings, "multilingual_embedding_dimension", 768)
     fake_hf_cache.update({
         (embedding.settings.embedding_model, "modules.json"),
         (embedding.settings.embedding_model, "model.safetensors"),

@@ -116,6 +116,14 @@ class DevelopmentFallbackEmbedding:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._embed_sync, texts)
 
+    def _dimension_for(self, text: str) -> int:
+        """
+        Matches the dimension of the model the text would have been routed to.
+        """
+        if settings.use_multilingual_embedding or (settings.auto_detect_lang and is_arabic(text)):
+            return settings.multilingual_embedding_dimension
+        return self.dimension
+
     def _embed_sync(self, texts: list[str]) -> list[list[float]]:
         """
         Builds deterministic hash embeddings in a worker thread.
@@ -123,10 +131,9 @@ class DevelopmentFallbackEmbedding:
         embeddings: list[list[float]] = []
         for text in texts:
             if not is_embedding_quality_text(text):
-                dim = 768 if (settings.use_multilingual_embedding or (settings.auto_detect_lang and is_arabic(text))) else self.dimension
-                embeddings.append(zero_embedding(dim))
+                embeddings.append(zero_embedding(self._dimension_for(text)))
                 continue
-            dim = 768 if (settings.use_multilingual_embedding or (settings.auto_detect_lang and is_arabic(text))) else self.dimension
+            dim = self._dimension_for(text)
             digest = hashlib.sha256(text.encode("utf-8")).digest()
             seed = int.from_bytes(digest[:8], "big", signed=False)
             rng = np.random.default_rng(seed)
@@ -329,7 +336,7 @@ def validate_embedding_vector(embedding: list[float], expected_dimension: int | 
     if expected_dimension is not None:
         expected_dims = {expected_dimension}
     else:
-        expected_dims = {384, 768, settings.embedding_dimension}
+        expected_dims = {settings.embedding_dimension, settings.multilingual_embedding_dimension}
         
     if len(embedding) not in expected_dims:
         raise ValueError(
@@ -364,9 +371,9 @@ def embedding_dimension_for_text(text: str | None = None) -> int:
     Returns the expected embedding dimension for the configured language route.
     """
     if settings.use_multilingual_embedding:
-        return 768
+        return settings.multilingual_embedding_dimension
     if settings.auto_detect_lang and is_arabic(text):
-        return 768
+        return settings.multilingual_embedding_dimension
     return settings.embedding_dimension
 
 
@@ -566,7 +573,7 @@ def get_multilingual_embedding_service() -> EmbeddingProvider:
     """
     provider = settings.embedding_provider.lower()
     model_name = settings.multilingual_embedding_model
-    return _get_cached_embedding_service(provider, model_name, 768)
+    return _get_cached_embedding_service(provider, model_name, settings.multilingual_embedding_dimension)
 
 
 def get_standard_embedding_service() -> EmbeddingProvider:
