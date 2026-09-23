@@ -304,6 +304,40 @@ async def test_get_redis_never_hands_out_an_unverified_client(monkeypatch) -> No
 
 
 @pytest.mark.asyncio
+async def test_get_redis_closes_failed_clients_and_warns_once_per_outage(monkeypatch, caplog) -> None:
+    """
+    Regression: every retry leaked the failed client and logged a new warning
+    (every few seconds while Redis was down).
+    """
+    import logging
+
+    import redis.asyncio as aioredis
+
+    from app.core import redis as redis_module
+
+    closed = []
+
+    class DownClient:
+        async def ping(self):
+            raise ConnectionError("refused")
+
+        async def aclose(self):
+            closed.append(1)
+
+    monkeypatch.setattr(aioredis, "from_url", lambda *args, **kwargs: DownClient())
+    monkeypatch.setattr(redis_module, "_redis", None)
+    monkeypatch.setattr(redis_module, "_outage_logged", False)
+
+    with caplog.at_level(logging.WARNING, logger="app.core.redis"):
+        for _ in range(3):
+            monkeypatch.setattr(redis_module, "_unavailable_until", 0.0)
+            assert await redis_module.get_redis() is None
+
+    assert len(closed) == 3
+    assert [r.message for r in caplog.records].count("Redis not available, caching disabled") == 1
+
+
+@pytest.mark.asyncio
 async def test_refinement_enqueue_falls_back_to_memory_when_redis_push_fails(monkeypatch) -> None:
     """
     Checks that a refinement task is not lost when Redis fails mid-push (development).

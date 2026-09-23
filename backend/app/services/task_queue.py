@@ -25,6 +25,8 @@ SKILL_STATUS_TASK = "skill_status_refinement"
 _in_memory_tasks: dict[str, dict[str, Any]] = {}
 _in_memory_results: dict[str, dict[str, Any]] = {}
 _in_memory_task_owners: dict[str, str] = {}
+# Warn once, not once per queued CV, that the in-memory fallback is in use.
+_memory_fallback_warned = False
 
 
 async def enqueue_cv_processing(
@@ -63,7 +65,10 @@ async def enqueue_cv_processing(
     else:
         if settings.is_production:
             raise RuntimeError("Redis is required for CV task queueing in production")
-        logger.warning("Redis not available, storing task in memory (will be lost on restart)")
+        global _memory_fallback_warned
+        if not _memory_fallback_warned:
+            logger.warning("Redis not available, storing tasks in memory (they are lost on restart)")
+            _memory_fallback_warned = True
         _in_memory_tasks[task_id] = task
         if created_by_user_id:
             _in_memory_task_owners[task_id] = created_by_user_id
