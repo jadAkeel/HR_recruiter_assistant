@@ -196,7 +196,8 @@ Open http://localhost:5173.
 
 ```powershell
 cd backend; python scripts/download_models.py   # once: pre-fetch embedding + whisper weights
-cd ..; powershell -ExecutionPolicy Bypass -File scriptsun_demo.ps1
+cd ..; powershell -ExecutionPolicy Bypass -File scripts
+un_demo.ps1
 ```
 
 `scripts/run_demo.ps1` checks Ollama (and starts `ollama serve` if needed), then warms up
@@ -517,7 +518,6 @@ HR_recruiter_assistant/
 │   └── vite.config.ts
 ├── scripts/                       # PowerShell & Python utility scripts
 ├── nginx/                         # Production nginx config
-├── nlpPrompt/                     # Project development prompts
 ├── docker-compose.yml             # Development stack
 ├── docker-compose.prod.yml        # Production stack
 ├── .dockerignore
@@ -702,13 +702,10 @@ Saved as Report with versioning
 | `backend/scripts/backfill_production_readiness.py` | Backfill production data |
 | `backend/scripts/generate_cs_cvs.py` | Generate clearly labelled synthetic CV fixtures with reserved contact details |
 | `backend/scripts/download_real_cvs.py` | Download external CV data into the Git-ignored `backend/private_cv_imports/` directory |
-| `backend/check_candidates.py` | Diagnostic: inspect candidate data |
-| `backend/find_triple.py` | Diagnostic: find skill triples |
-| `backend/reset_pass.py` | Reset a local user password from a prompt or `RESET_USER_EMAIL` / `RESET_USER_PASSWORD` |
-| `check_db.py` | Inspect database contents |
-| `copy_candidates.py` | Copy candidates between environments |
-| `generate_report_final.py` | Generate final audit report |
-| `reset_password.py` | Password reset utility |
+| `backend/scripts/upload_all.py` | Start the backend on port 8000 and upload every PDF in `backend/cvs_to_upload/` |
+| `backend/scripts/set_user_role.py` | Create a user or reset their password and role (`--email`, `--role`, prompts for the password) |
+| `backend/scripts/migrate_years_experience.py` | Backfill `total_years_experience` for existing candidates |
+| `scripts/run_demo.ps1` | One-command local demo launcher |
 
 The tracked PDFs in `backend/cvs_to_upload/` are synthetic test fixtures. Do
 not add real candidate resumes or personal contact data to that directory.
