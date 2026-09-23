@@ -7,7 +7,7 @@ from app.core.config import settings
 from app.core.db import init_db
 from app.core.logging import configure_logging, shutdown_logging
 from app.core.redis import close_redis, get_redis
-from app.main import _cv_worker
+from app.main import _cv_worker, _start_knowledge_sync, _warm_embedding_model
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +22,14 @@ async def run() -> None:
         await init_db()
         if settings.is_production and await get_redis() is None:
             raise RuntimeError("Redis is required for production CV worker")
+        await _warm_embedding_model()
         logger.info("Starting standalone CV worker")
-        await _cv_worker()
+        knowledge_task = _start_knowledge_sync()
+        try:
+            await _cv_worker()
+        finally:
+            if knowledge_task is not None:
+                knowledge_task.cancel()
     finally:
         await close_redis()
         shutdown_logging()

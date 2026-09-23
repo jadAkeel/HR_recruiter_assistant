@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -41,6 +42,7 @@ def _normalize_string_list(values: list[str], *, lowercase: bool = False, max_it
 
 class SkillStatus(str, Enum):
     HAS_EXPERIENCE = "has_experience"
+    WEAK = "weak"
     LEARNING = "learning"
     NO_EXPERIENCE = "no_experience"
     UNKNOWN = "unknown"
@@ -66,6 +68,11 @@ class SkillDetail(BaseModel):
     esco_uri: str | None = None
     preferred_label: str | None = None
     category: str | None = None
+    # Written by app.services.skill_status: who decided the status (rule / llm /
+    # default), the CV section of the evidence sentence, and every sentence assessed.
+    source: str | None = None
+    section: str | None = None
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
 
     @field_validator("name")
     @classmethod

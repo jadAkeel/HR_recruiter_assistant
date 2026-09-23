@@ -13,6 +13,7 @@ An AI-powered recruitment automation platform that covers the entire hiring life
 - [Getting Started](#getting-started)
   - [Development (Docker)](#development-docker)
   - [Development (Manual)](#development-manual)
+  - [Local demo (one command)](#local-demo-one-command)
   - [Production](#production)
 - [Environment Variables](#environment-variables)
 - [API Endpoints](#api-endpoints)
@@ -112,7 +113,7 @@ An AI-powered recruitment automation platform that covers the entire hiring life
 - **Semantic Similarity** — cosine similarity between job and candidate embeddings (sentence-transformers or Ollama)
 - **Cross-Encoder Reranking** — Ollama LLM reranks top candidates with bounded score adjustment
 - **Structured Scoring** — experience years, seniority fit, education level
-- **RAG Enrichment** — knowledge base lookups for skill definitions
+- **RAG Enrichment** — capped partial credit (0.60) for missing umbrella skills (NLP, DevOps, …) proven by concrete indicators from `backend/data/skill_knowledge.json`; the matched indicators and best evidence sentence are recorded in `rag_evidence`. Benchmark with `python scripts/benchmark_rag_enrichment.py`
 - **Feedback Integration** — historical recruiter acceptance/rejection affects future matches
 - **Explainable Scores** — transparent breakdown of every scoring component with reasoning trace
 
@@ -191,6 +192,21 @@ npm run dev
 
 Open http://localhost:5173.
 
+### Local demo (one command)
+
+```powershell
+cd backend; python scripts/download_models.py   # once: pre-fetch embedding + whisper weights
+cd ..; powershell -ExecutionPolicy Bypass -File scripts
+un_demo.ps1
+```
+
+`scripts/run_demo.ps1` checks Ollama (and starts `ollama serve` if needed), then warms up
+`llama3.2` and `gemma3:4b` (a first CPU load takes ~25s each). If Docker Desktop is running, it
+starts or reuses a `demo-redis` container. Then it starts the backend on `:8000` and the frontend
+(`npm run dev`) on `:5173`, and prints `/api/v1/ready`. Useful flags: `-SkipWarmup`, `-NoRedis`,
+`-NoOllama`, and `-NoWait` (leave the services running and print the stop command). It uses the
+database from `backend/.env`.
+
 ### Production
 
 ```bash
@@ -210,6 +226,9 @@ Ollama models are pulled automatically on startup: `llama3.2`, `gemma3:4b`, `nom
 | `DATABASE_URL` | `sqlite+aiosqlite:///./app.db` | Database connection string |
 | `EMBEDDING_PROVIDER` | `hash` | `hash`, `sentence-transformers`, or `ollama` |
 | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Sentence-transformers model name |
+| `AUTO_DETECT_LANG` | `true` | Route Arabic text to `MULTILINGUAL_EMBEDDING_MODEL` (loaded lazily on the first Arabic text) |
+| `MULTILINGUAL_EMBEDDING_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | 768-dim model for Arabic text |
+| `ALLOW_MODEL_DOWNLOAD` | unset (= only in production) | Download missing HuggingFace models on first use. Otherwise a missing model fails fast and falls back; pre-fetch with `python scripts/download_models.py`. `HF_HUB_OFFLINE=1` always disables downloads |
 | `LLM_PROVIDER` | `ollama` | LLM provider for parsing & interviews |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
 | `OLLAMA_MODEL` | `llama3.2` | Default LLM model |
@@ -219,7 +238,9 @@ Ollama models are pulled automatically on startup: `llama3.2`, `gemma3:4b`, `nom
 | `JWT_SECRET_KEY` | `dev-only-...` | JWT signing secret (min 32 chars) |
 | `ENVIRONMENT` | `development` | `development` or `production` |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string |
-| `CORS_ORIGINS_STR` | `http://localhost:5173,...` | Allowed CORS origins |
+| `CORS_ORIGINS_STR` | `http://localhost:5173,...` | Allowed CORS origins (exact origins; the only source of allowed origins in production) |
+| `TRUSTED_HOSTS_STR` | `localhost,127.0.0.1,testserver` | Allowed `Host` headers; `RENDER_EXTERNAL_HOSTNAME` is appended automatically |
+| `CORS_ALLOW_TUNNELS` | `false` | Outside production, also accept any `*.ngrok-free.app/.dev`, `*.ngrok.io/.app`, `*.lhr.life` origin and host. Off by default: tunnel domains are shared, and CORS runs with credentials. `scripts/start-ngrok-tunnel.ps1` writes your exact tunnel URL to `.env`, so it does not need this |
 | `ESCO_API_ENABLED` | `false` | Enable ESCO taxonomy enrichment |
 | `APP_BASE_URL` | `http://localhost:5173` | App base URL (emails, links) |
 | `MAX_UPLOAD_BYTES` | `15728640` | Max upload size (15MB) |
@@ -322,7 +343,7 @@ All endpoints are prefixed with `/api/v1`. Full interactive docs at http://local
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/rag/ingest` | Add knowledge document |
-| POST | `/rag/seed` | Seed built-in knowledge base |
+| POST | `/rag/seed` | Sync built-in knowledge base (idempotent; also runs in the background on startup unless `RAG_AUTO_SEED=false`) |
 | POST | `/rag/query` | Query knowledge base semantically |
 
 ### ESCO
@@ -497,7 +518,6 @@ HR_recruiter_assistant/
 │   └── vite.config.ts
 ├── scripts/                       # PowerShell & Python utility scripts
 ├── nginx/                         # Production nginx config
-├── nlpPrompt/                     # Project development prompts
 ├── docker-compose.yml             # Development stack
 ├── docker-compose.prod.yml        # Production stack
 ├── .dockerignore
@@ -682,13 +702,10 @@ Saved as Report with versioning
 | `backend/scripts/backfill_production_readiness.py` | Backfill production data |
 | `backend/scripts/generate_cs_cvs.py` | Generate clearly labelled synthetic CV fixtures with reserved contact details |
 | `backend/scripts/download_real_cvs.py` | Download external CV data into the Git-ignored `backend/private_cv_imports/` directory |
-| `backend/check_candidates.py` | Diagnostic: inspect candidate data |
-| `backend/find_triple.py` | Diagnostic: find skill triples |
-| `backend/reset_pass.py` | Reset a local user password from a prompt or `RESET_USER_EMAIL` / `RESET_USER_PASSWORD` |
-| `check_db.py` | Inspect database contents |
-| `copy_candidates.py` | Copy candidates between environments |
-| `generate_report_final.py` | Generate final audit report |
-| `reset_password.py` | Password reset utility |
+| `backend/scripts/upload_all.py` | Start the backend on port 8000 and upload every PDF in `backend/cvs_to_upload/` |
+| `backend/scripts/set_user_role.py` | Create a user or reset their password and role (`--email`, `--role`, prompts for the password) |
+| `backend/scripts/migrate_years_experience.py` | Backfill `total_years_experience` for existing candidates |
+| `scripts/run_demo.ps1` | One-command local demo launcher |
 
 The tracked PDFs in `backend/cvs_to_upload/` are synthetic test fixtures. Do
 not add real candidate resumes or personal contact data to that directory.

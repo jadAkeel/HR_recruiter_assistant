@@ -21,6 +21,28 @@ TEMP_AUDIO_TTL = 3600
 _WHISPER_MODEL: Any | None = None
 
 
+def _load_whisper_model() -> Any:
+    """
+    Loads faster-whisper from the local cache, downloading only when allowed.
+    """
+    from faster_whisper import WhisperModel
+
+    from app.services.model_cache import (
+        WHISPER_MODEL_SIZE,
+        ModelNotCachedError,
+        missing_model_message,
+        model_downloads_allowed,
+    )
+
+    try:
+        return WhisperModel(WHISPER_MODEL_SIZE, device="cpu", compute_type="int8", local_files_only=True)
+    except Exception:
+        if not model_downloads_allowed():
+            raise ModelNotCachedError(missing_model_message(f"faster-whisper-{WHISPER_MODEL_SIZE}")) from None
+    logger.warning("faster-whisper %s is not cached; downloading from HuggingFace", WHISPER_MODEL_SIZE)
+    return WhisperModel(WHISPER_MODEL_SIZE, device="cpu", compute_type="int8")
+
+
 def _cleanup_temp_files() -> None:
     """
     Removes expired temporary audio files.
@@ -191,10 +213,9 @@ class VoiceService:
         Performs synchronous faster-whisper transcription from a temp file.
         """
         global _WHISPER_MODEL
-        from faster_whisper import WhisperModel
 
         if _WHISPER_MODEL is None:
-            _WHISPER_MODEL = WhisperModel("base", device="cpu", compute_type="int8")
+            _WHISPER_MODEL = _load_whisper_model()
         tmp_path = self._save_temp_audio(audio_data, suffix=".webm")
 
         try:

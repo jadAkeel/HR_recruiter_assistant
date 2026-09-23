@@ -9,7 +9,7 @@ from app.core.db import get_db_session
 from app.core.deps import require_any_role
 from app.models.user import User
 from app.schemas.rag import IngestRequest, IngestResponse, QueryRequest, QueryResponse
-from app.services.rag import add_document, ingest_knowledge_base, query_knowledge
+from app.services.rag import add_document, query_knowledge, sync_knowledge_base
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,15 @@ async def ingest(
     """
     Adds one knowledge document through the RAG API.
     """
-    return await add_document(session, request.title, request.content, request.category, request.tags)
+    return await add_document(
+        session,
+        request.title,
+        request.content,
+        request.category,
+        request.tags,
+        indicators=request.indicators,
+        not_sufficient=request.not_sufficient,
+    )
 
 
 @router.post("/rag/seed")
@@ -34,10 +42,10 @@ async def seed_knowledge(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """
-    Seeds the built-in RAG knowledge base.
+    Seeds the built-in RAG knowledge base (same idempotent sync as startup).
     """
-    count = await ingest_knowledge_base(session)
-    return {"seeded": count}
+    report = await sync_knowledge_base(session)
+    return {"seeded": report.inserted, **report.to_dict()}
 
 
 @router.post("/rag/query", response_model=QueryResponse)

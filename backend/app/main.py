@@ -66,6 +66,29 @@ async def _keep_alive_worker() -> None:
             await asyncio.sleep(interval)
 
 
+async def _warm_embedding_model() -> None:
+    """
+    Loads the local embedding model at startup, off the event loop, so the first
+    request is fast and a model that cannot load is reported in the startup log.
+    """
+    if settings.embedding_provider != "sentence-transformers":
+        return
+    from app.services.embedding import (
+        embedding_runtime_status,
+        get_multilingual_embedding_service,
+        get_standard_embedding_service,
+    )
+
+    loader = get_multilingual_embedding_service if settings.use_multilingual_embedding else get_standard_embedding_service
+    try:
+        await asyncio.to_thread(loader)
+    except Exception:
+        logger.exception("Embedding model failed to load at startup")
+        return
+    for model, status in embedding_runtime_status().items():
+        logger.info("Embedding model %s served by %s", model, status["active_provider"])
+
+
 async def _ensure_initial_owner() -> None:
     """
     Ensures a configured owner account exists before serving requests.
@@ -79,6 +102,18 @@ async def _ensure_initial_owner() -> None:
             logger.info("Initial owner account is ready: %s", owner.email)
 
 
+def _start_knowledge_sync() -> asyncio.Task | None:
+    """
+    Syncs the RAG knowledge base in the background so embedding never delays startup.
+    """
+    if not settings.rag_auto_seed:
+        return None
+    from app.services.rag import seed_knowledge_base_on_startup
+
+    logger.info("RAG knowledge base sync started in background")
+    return asyncio.create_task(seed_knowledge_base_on_startup())
+
+
 # Background worker that processes CV uploads from the task queue
 async def _cv_worker():
     """
@@ -90,6 +125,7 @@ async def _cv_worker():
     from app.services.cv_parser import extract_text, parse_cv_text
     from app.services.candidate_text import upsert_candidate_embedding
     from app.services.skill_evidence import replace_candidate_skill_evidence
+    from app.services.skill_status_refinement import enqueue_if_needed, refine_candidate_skill_status
     from app.models.candidate import Candidate
     from sqlalchemy import select
     from pathlib import Path
@@ -153,13 +189,14 @@ async def _cv_worker():
         pending_path = Path(file_path) if file_path else None
         if pending_path and pending_path.exists():
             content = pending_path.read_bytes()
-            cv_text = extract_text(file_name, content)
+            # CPU-bound: run in a thread so an in-API worker does not stall requests.
+            cv_text = await asyncio.to_thread(extract_text, file_name, content)
         if not cv_text:
             raise ValueError("CV text could not be extracted")
 
         async with SessionLocal() as session:
             parser = get_enhanced_cv_parser() if use_llm else None
-            profile = await parser.parse_async(cv_text) if parser else parse_cv_text(cv_text)
+            profile = await parser.parse_async(cv_text) if parser else await asyncio.to_thread(parse_cv_text, cv_text)
 
             if profile.email:
                 stmt = (
@@ -192,6 +229,7 @@ async def _cv_worker():
                         )
                     if pending_path:
                         pending_path.unlink(missing_ok=True)
+                    await enqueue_if_needed(existing)
                     return {
                         "candidate_id": existing.id,
                         "cv_url": cv_url,
@@ -230,6 +268,7 @@ async def _cv_worker():
                     "Embedding generation failed for candidate %s — candidate created without vector",
                     candidate_id,
                 )
+            await enqueue_if_needed(candidate)
 
             return {
                 "candidate_id": candidate_id,
@@ -242,7 +281,14 @@ async def _cv_worker():
                 "status": "created",
             }
 
-    await run_cv_worker(process_cv)
+    async def refine_skill_status(candidate_id: str, raw_text_hash: str | None = None) -> dict:
+        """
+        Runs the background LLM pass over one candidate's unresolved skill sentences.
+        """
+        async with SessionLocal() as session:
+            return await refine_candidate_skill_status(session, candidate_id, raw_text_hash)
+
+    await run_cv_worker(process_cv, refine_skill_status)
 
 
 @asynccontextmanager
@@ -258,21 +304,19 @@ async def lifespan(_: FastAPI):
         if settings.is_production and await get_redis() is None:
             raise RuntimeError("Redis is required for production CV task queueing")
         logger.info("Embedding provider: %s", settings.embedding_provider)
+        await _warm_embedding_model()
+        knowledge_task = _start_knowledge_sync()
         worker_task = asyncio.create_task(_cv_worker()) if settings.run_cv_worker_in_api else None
         keep_alive_task = asyncio.create_task(_keep_alive_worker()) if _should_run_keep_alive() else None
         if worker_task is None:
             logger.info("In-process CV worker disabled; expecting external worker service")
         yield
-        if worker_task is not None:
-            worker_task.cancel()
+        for task in (worker_task, keep_alive_task, knowledge_task):
+            if task is None:
+                continue
+            task.cancel()
             try:
-                await worker_task
-            except asyncio.CancelledError:
-                pass
-        if keep_alive_task is not None:
-            keep_alive_task.cancel()
-            try:
-                await keep_alive_task
+                await task
             except asyncio.CancelledError:
                 pass
     finally:
@@ -286,6 +330,46 @@ async def lifespan(_: FastAPI):
         shutdown_logging()
 
 
+# Tunnel domains are shared by every ngrok/localhost.run user, so trusting them with
+# credentialed CORS lets any tunnel owner call the API as a logged-in user. They are
+# opt-in (CORS_ALLOW_TUNNELS=true) and never honored in production.
+TUNNEL_HOST_PATTERNS = ["*.ngrok-free.app", "*.ngrok-free.dev", "*.ngrok.io", "*.ngrok.app", "*.lhr.life"]
+TUNNEL_ORIGIN_REGEX = r"https://([a-z0-9-]+\.)+(ngrok-free\.app|ngrok-free\.dev|ngrok\.io|ngrok\.app|lhr\.life)"
+LOCAL_ORIGIN_REGEX = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
+
+
+def _tunnels_allowed() -> bool:
+    """
+    Checks whether tunnel domains are opted in for this non-production run.
+    """
+    if settings.cors_allow_tunnels and settings.is_production:
+        logger.warning("CORS_ALLOW_TUNNELS is ignored in production; list tunnel origins explicitly")
+        return False
+    return settings.cors_allow_tunnels
+
+
+def _trusted_hosts() -> list[str]:
+    """
+    Returns configured hosts plus loopback, and tunnel wildcards only when opted in.
+    """
+    hosts = settings.trusted_hosts + ["localhost", "127.0.0.1"]
+    if _tunnels_allowed():
+        hosts += TUNNEL_HOST_PATTERNS
+    return list(dict.fromkeys(hosts))
+
+
+def _cors_origin_regex() -> str | None:
+    """
+    Returns the extra CORS origin pattern: any localhost port in development, plus
+    tunnel domains only when opted in. Production relies on CORS_ORIGINS_STR alone.
+    """
+    if settings.is_production:
+        return None
+    if _tunnels_allowed():
+        return f"({LOCAL_ORIGIN_REGEX})|({TUNNEL_ORIGIN_REGEX})"
+    return LOCAL_ORIGIN_REGEX
+
+
 def create_app() -> FastAPI:
     """
     Creates and configures the FastAPI application.
@@ -293,32 +377,17 @@ def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(GZipMiddleware, minimum_size=1024)
-    trusted = settings.trusted_hosts + [
-        "*.ngrok-free.app",
-        "*.ngrok-free.dev",
-        "*.ngrok.io",
-        "*.onrender.com",
-        "onrender.com",
-        "localhost",
-        "127.0.0.1",
-    ]
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=_trusted_hosts())
     if settings.rate_limit_enabled:
         app.add_middleware(
             RateLimitMiddleware,
             requests=settings.rate_limit_requests,
             window_seconds=settings.rate_limit_window_seconds,
         )
-    cors_origin_regex = None
-    if not settings.is_production:
-        cors_origin_regex = (
-            r"https?://(.*\.ngrok-free\.(app|dev)|.*\.ngrok\.io|"
-            r".*\.onrender\.com|lhr\.life|localhost:\d+)"
-        )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_origin_regex=cors_origin_regex,
+        allow_origin_regex=_cors_origin_regex(),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

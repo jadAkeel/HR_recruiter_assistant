@@ -150,8 +150,17 @@ async def _ensure_embedding_metadata_columns(connection) -> None:
             await connection.execute(text(f"ALTER TABLE embeddings ADD COLUMN {column} {column_type}"))
 
     # 2. Update knowledge_documents table
+    json_type = "TEXT" if engine.dialect.name == "sqlite" else "JSON"
     kd_columns = {
-        "embedding_multilingual": "TEXT" if engine.dialect.name == "sqlite" else "JSON",
+        "embedding_multilingual": json_type,
+        "doc_key": "VARCHAR(128)",
+        "indicators": json_type,
+        "not_sufficient": json_type,
+        "content_hash": "VARCHAR(64)",
+        "embedding_model": "VARCHAR(255)",
+        "embedding_vector": (
+            f"vector({settings.embedding_dimension})" if engine.dialect.name == "postgresql" else json_type
+        ),
     }
     if engine.dialect.name == "sqlite":
         result = await connection.execute(text("PRAGMA table_info(knowledge_documents)"))
@@ -169,6 +178,9 @@ async def _ensure_embedding_metadata_columns(connection) -> None:
         if column not in existing_kd:
             logger.info("Adding column %s to table knowledge_documents", column)
             await connection.execute(text(f"ALTER TABLE knowledge_documents ADD COLUMN {column} {column_type}"))
+    await connection.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_knowledge_documents_doc_key ON knowledge_documents (doc_key)"
+    ))
 
     # 3. Update candidates table
     cand_columns = {

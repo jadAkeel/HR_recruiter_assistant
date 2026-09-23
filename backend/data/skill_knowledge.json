@@ -1,0 +1,426 @@
+{
+  "version": 1,
+  "description": "Umbrella-skill knowledge used by RAG enrichment. 'indicators' are concrete sub-skills, techniques, libraries or tools that strongly imply the skill. 'not_sufficient' lists look-alike terms that must never grant credit on their own; when a not_sufficient phrase covers an indicator occurrence, that occurrence is ignored.",
+  "skills": [
+    {
+      "skill": "nlp",
+      "definition": "Natural language processing (NLP) is the branch of machine learning that builds systems to analyze, understand and generate human language text. Practitioners train and apply language models for tasks such as tokenization, entity recognition, text classification, summarization and translation.",
+      "indicators": ["bert", "roberta", "distilbert", "tokenization", "tokenizer", "lemmatization", "stemming", "named entity recognition", "entity extraction", "part-of-speech tagging", "pos tagging", "dependency parsing", "text classification", "sentiment analysis", "topic modeling", "text summarization", "machine translation", "word embeddings", "word2vec", "glove embeddings", "fasttext", "tf-idf", "language model", "sequence labeling", "coreference resolution", "information extraction", "spacy", "nltk", "gensim", "hugging face"],
+      "not_sufficient": ["sentiment", "brand sentiment", "customer sentiment analysis", "brand sentiment analysis", "market sentiment", "translation", "translator", "linguistics", "language skills", "copywriting", "payment tokenization", "card tokenization", "asset tokenization"]
+    },
+    {
+      "skill": "machine learning",
+      "definition": "Machine learning is the practice of training statistical models that learn patterns from data to make predictions or decisions without explicit rules. It covers supervised and unsupervised algorithms, feature engineering, model training and evaluation.",
+      "indicators": ["scikit-learn", "xgboost", "lightgbm", "catboost", "random forest", "gradient boosting", "logistic regression", "support vector machine", "svm", "k-means", "decision tree", "neural network", "supervised learning", "unsupervised learning", "feature engineering", "cross-validation", "hyperparameter tuning", "deep learning", "pytorch", "tensorflow", "keras", "mlflow"],
+      "not_sufficient": ["excel", "data analysis", "pivot tables", "statistics", "linear regression", "forecasting", "business intelligence", "power bi", "tableau", "dashboards", "a/b testing", "data entry"]
+    },
+    {
+      "skill": "deep learning",
+      "definition": "Deep learning is a subfield of machine learning that trains multi-layer neural networks, such as convolutional, recurrent and transformer networks, on large datasets, usually on GPUs.",
+      "indicators": ["pytorch", "tensorflow", "keras", "jax", "neural network", "convolutional neural network", "recurrent neural network", "lstm", "gru", "transformer architecture", "backpropagation", "resnet", "bert", "generative adversarial network", "autoencoder", "attention mechanism", "yolo", "cuda"],
+      "not_sufficient": ["machine learning", "data science", "ai tools", "chatgpt"]
+    },
+    {
+      "skill": "computer vision",
+      "definition": "Computer vision is the field of machine learning that enables computers to interpret images and video, using models for image classification, object detection, segmentation and tracking.",
+      "indicators": ["opencv", "image classification", "object detection", "image segmentation", "semantic segmentation", "instance segmentation", "yolo", "resnet", "u-net", "convolutional neural network", "face recognition", "facial recognition", "pose estimation", "mediapipe", "detectron", "vision transformer", "torchvision", "optical flow", "object tracking"],
+      "not_sufficient": ["photoshop", "lightroom", "image editing", "photo editing", "photography", "graphic design", "video editing", "vision statement", "illustrator"]
+    },
+    {
+      "skill": "reinforcement learning",
+      "definition": "Reinforcement learning trains agents to choose actions that maximize cumulative reward through trial-and-error interaction with an environment.",
+      "indicators": ["q-learning", "deep q-network", "dqn", "policy gradient", "proximal policy optimization", "ppo", "actor-critic", "openai gym", "gymnasium", "stable-baselines", "markov decision process", "multi-armed bandit", "reward shaping", "rlhf"],
+      "not_sufficient": ["positive reinforcement", "reinforced concrete", "reinforcement bars"]
+    },
+    {
+      "skill": "mlops",
+      "definition": "MLOps is the discipline of deploying, monitoring and maintaining machine learning models in production, including experiment tracking, model registries, serving infrastructure and drift monitoring.",
+      "indicators": ["mlflow", "kubeflow", "model registry", "model serving", "model monitoring", "drift detection", "feature store", "sagemaker", "vertex ai", "bentoml", "seldon", "torchserve", "triton inference server", "dvc", "weights & biases"],
+      "not_sufficient": ["devops", "ci/cd", "docker", "machine learning"]
+    },
+    {
+      "skill": "llm",
+      "definition": "Large language model (LLM) engineering is building applications on top of large pretrained language models, including prompting, retrieval augmentation, fine-tuning and evaluation of model outputs.",
+      "indicators": ["gpt-4", "gpt-3.5", "openai api", "llama", "mistral", "langchain", "llamaindex", "retrieval augmented generation", "lora", "qlora", "rlhf", "vllm", "ollama", "function calling", "prompt engineering", "hugging face"],
+      "not_sufficient": ["chatgpt", "used chatgpt", "copilot", "ai tools", "master of laws"]
+    },
+    {
+      "skill": "prompt engineering",
+      "definition": "Prompt engineering is designing, testing and iterating instructions and examples given to large language models so they produce reliable, well-structured outputs.",
+      "indicators": ["few-shot prompting", "chain-of-thought", "prompt templates", "system prompts", "prompt evaluation", "prompt tuning", "langchain", "openai api", "function calling"],
+      "not_sufficient": ["chatgpt", "used chatgpt", "copywriting"]
+    },
+    {
+      "skill": "rag",
+      "definition": "Retrieval-augmented generation (RAG) combines a retriever that finds relevant documents, usually via embeddings and a vector index, with a language model that generates answers grounded in the retrieved text.",
+      "indicators": ["vector database", "pgvector", "llamaindex", "langchain", "semantic search", "embedding search", "reranking", "document chunking", "hybrid search", "dense retrieval", "sentence-transformers", "retrieval pipeline"],
+      "not_sufficient": ["search engine optimization", "seo", "chatgpt"]
+    },
+    {
+      "skill": "retrieval augmented generation",
+      "definition": "Retrieval-augmented generation (RAG) combines a retriever that finds relevant documents, usually via embeddings and a vector index, with a language model that generates answers grounded in the retrieved text.",
+      "indicators": ["vector database", "pgvector", "llamaindex", "langchain", "semantic search", "embedding search", "reranking", "document chunking", "hybrid search", "dense retrieval", "sentence-transformers", "retrieval pipeline"],
+      "not_sufficient": ["search engine optimization", "seo", "chatgpt"]
+    },
+    {
+      "skill": "semantic search",
+      "definition": "Semantic search retrieves documents by meaning rather than exact keywords, by encoding queries and documents as dense embeddings and ranking them by vector similarity.",
+      "indicators": ["vector database", "pgvector", "sentence-transformers", "embedding search", "dense retrieval", "approximate nearest neighbor", "hnsw", "reranking", "hybrid search"],
+      "not_sufficient": ["search engine optimization", "seo", "google search"]
+    },
+    {
+      "skill": "vector database",
+      "definition": "A vector database stores high-dimensional embedding vectors and serves fast approximate nearest-neighbour similarity queries over them.",
+      "indicators": ["pgvector", "hnsw", "approximate nearest neighbor", "annoy", "lancedb", "vespa", "redis vector search"],
+      "not_sufficient": ["database", "sql", "excel"]
+    },
+    {
+      "skill": "fine tuning",
+      "definition": "Fine-tuning adapts a pretrained machine learning model to a specific task or domain by continuing training on task data, often with parameter-efficient methods.",
+      "indicators": ["lora", "qlora", "peft", "transfer learning", "instruction tuning", "rlhf", "domain adaptation", "hugging face trainer"],
+      "not_sufficient": ["performance tuning", "database tuning", "query tuning", "fine-tuned the process"]
+    },
+    {
+      "skill": "data science",
+      "definition": "Data science applies statistics, programming and machine learning to extract insight and build predictive models from data.",
+      "indicators": ["scikit-learn", "pandas", "jupyter", "statistical modeling", "hypothesis testing", "machine learning", "feature engineering", "exploratory data analysis", "xgboost", "random forest", "seaborn"],
+      "not_sufficient": ["excel", "data entry", "reporting", "dashboards", "power bi"]
+    },
+    {
+      "skill": "data analysis",
+      "definition": "Data analysis is inspecting, cleaning, transforming and summarizing data to answer business questions, typically with SQL, spreadsheets, BI tools or pandas.",
+      "indicators": ["pandas", "pivot tables", "exploratory data analysis", "statistical analysis", "tableau", "power bi", "looker", "data visualization", "sql queries"],
+      "not_sufficient": ["data entry", "typing"]
+    },
+    {
+      "skill": "data engineering",
+      "definition": "Data engineering is designing and operating pipelines and storage systems that ingest, transform and serve data reliably at scale for analytics and machine learning.",
+      "indicators": ["etl", "elt", "data pipeline", "spark", "pyspark", "kafka", "airflow", "dbt", "data warehouse", "data lake", "snowflake", "bigquery", "redshift", "databricks", "hadoop", "apache flink", "apache beam", "dagster", "prefect", "fivetran", "airbyte", "delta lake"],
+      "not_sufficient": ["data entry", "excel", "data analysis", "spreadsheets"]
+    },
+    {
+      "skill": "etl",
+      "definition": "ETL (extract, transform, load) is the process of extracting data from source systems, transforming it and loading it into a target store such as a data warehouse.",
+      "indicators": ["informatica", "talend", "ssis", "airflow", "dbt", "data pipeline", "extract transform load", "extract, transform, load", "fivetran", "airbyte", "aws glue", "azure data factory", "pyspark"],
+      "not_sufficient": ["data entry", "excel", "copy and paste"]
+    },
+    {
+      "skill": "data pipeline",
+      "definition": "A data pipeline is an automated sequence of steps that moves and transforms data between systems on a schedule or as a stream.",
+      "indicators": ["airflow", "kafka", "etl", "dagster", "prefect", "apache beam", "spark streaming", "dbt", "aws glue", "azure data factory", "luigi"],
+      "not_sufficient": ["sales pipeline", "pipeline management", "talent pipeline", "oil pipeline"]
+    },
+    {
+      "skill": "data warehouse",
+      "definition": "A data warehouse is a central analytical database that integrates cleaned historical data from many sources, modelled for reporting and OLAP queries.",
+      "indicators": ["snowflake", "bigquery", "redshift", "star schema", "dimensional modeling", "fact tables", "olap", "kimball", "synapse analytics", "teradata"],
+      "not_sufficient": ["warehouse operations", "warehouse management", "forklift", "inventory"]
+    },
+    {
+      "skill": "data lake",
+      "definition": "A data lake is a storage repository that holds large volumes of raw structured and unstructured data in open file formats for later processing.",
+      "indicators": ["delta lake", "apache iceberg", "apache hudi", "azure data lake", "lake formation", "lakehouse", "parquet"],
+      "not_sufficient": ["lake", "file share"]
+    },
+    {
+      "skill": "big data",
+      "definition": "Big data engineering is processing datasets too large for a single machine using distributed frameworks such as Hadoop, Spark and streaming platforms.",
+      "indicators": ["hadoop", "spark", "pyspark", "hive", "hdfs", "mapreduce", "kafka", "apache flink", "databricks", "presto", "trino"],
+      "not_sufficient": ["excel", "large spreadsheets", "data entry"]
+    },
+    {
+      "skill": "data modeling",
+      "definition": "Data modeling is designing the structure of data, including entities, relationships, keys and normalization, for databases and warehouses.",
+      "indicators": ["entity relationship diagram", "er diagram", "erd", "star schema", "snowflake schema", "dimensional modeling", "data vault", "database normalization", "third normal form", "schema design"],
+      "not_sufficient": ["3d modeling", "financial modeling", "fashion modeling"]
+    },
+    {
+      "skill": "devops",
+      "definition": "DevOps is the practice of automating how software is built, tested, released and operated, combining CI/CD pipelines, infrastructure as code, containers and monitoring.",
+      "indicators": ["ci/cd", "jenkins", "github actions", "gitlab ci", "circleci", "argocd", "terraform", "ansible", "pulumi", "kubernetes", "docker", "helm charts", "infrastructure as code", "prometheus", "grafana", "site reliability engineering", "continuous integration", "continuous deployment", "continuous delivery"],
+      "not_sufficient": ["git", "linux", "bash", "agile", "version control"]
+    },
+    {
+      "skill": "ci/cd",
+      "definition": "CI/CD (continuous integration and continuous delivery or deployment) automates building, testing and releasing code on every change through pipelines.",
+      "indicators": ["jenkins", "github actions", "gitlab ci", "circleci", "travis ci", "azure pipelines", "bitbucket pipelines", "teamcity", "argocd", "spinnaker", "continuous integration", "continuous deployment", "continuous delivery", "build pipeline", "deployment pipeline"],
+      "not_sufficient": ["git", "version control", "code review"]
+    },
+    {
+      "skill": "kubernetes",
+      "definition": "Kubernetes is a container orchestration platform that schedules, scales and manages containerized workloads across a cluster of machines.",
+      "indicators": ["kubectl", "helm charts", "helm chart", "eks", "aks", "gke", "openshift", "kustomize", "istio", "argocd", "kubernetes operators", "rancher", "minikube", "k3s"],
+      "not_sufficient": ["docker", "docker compose", "docker-compose", "containers", "containerization", "docker swarm", "at the helm"]
+    },
+    {
+      "skill": "docker",
+      "definition": "Docker is a containerization platform for packaging applications and their dependencies into portable images that run as isolated containers.",
+      "indicators": ["dockerfile", "docker-compose", "docker swarm", "docker hub", "container images", "containerized", "dockerized", "multi-stage builds", "podman"],
+      "not_sufficient": ["virtual machines", "vmware", "vagrant", "shipping containers"]
+    },
+    {
+      "skill": "containerization",
+      "definition": "Containerization packages software with its dependencies into lightweight, isolated containers that run consistently across environments.",
+      "indicators": ["docker", "dockerfile", "docker-compose", "podman", "container images", "containerd", "lxc", "kubernetes"],
+      "not_sufficient": ["shipping containers", "virtual machines"]
+    },
+    {
+      "skill": "container orchestration",
+      "definition": "Container orchestration automates deployment, scaling, networking and healing of containers across a cluster.",
+      "indicators": ["kubernetes", "openshift", "docker swarm", "nomad", "amazon ecs", "eks", "aks", "gke", "helm charts"],
+      "not_sufficient": ["docker", "docker-compose", "containers"]
+    },
+    {
+      "skill": "infrastructure as code",
+      "definition": "Infrastructure as code manages servers, networks and cloud resources through versioned declarative configuration instead of manual setup.",
+      "indicators": ["terraform", "pulumi", "cloudformation", "ansible", "aws cdk", "bicep", "arm templates", "crossplane"],
+      "not_sufficient": ["shell scripts", "bash"]
+    },
+    {
+      "skill": "linux",
+      "definition": "Linux administration and development covers working with Linux distributions, the shell, services, permissions and system configuration.",
+      "indicators": ["ubuntu", "debian", "centos", "rhel", "red hat", "fedora", "arch linux", "bash scripting", "shell scripting", "systemd", "cron jobs", "iptables", "kernel modules"],
+      "not_sufficient": ["windows server", "macos", "windows"]
+    },
+    {
+      "skill": "cloud computing",
+      "definition": "Cloud computing is building and running systems on on-demand infrastructure and managed services from providers such as AWS, Azure or Google Cloud.",
+      "indicators": ["aws", "azure", "gcp", "google cloud", "ec2", "s3", "aws lambda", "cloudformation", "cloud run", "azure functions", "serverless", "iaas", "paas"],
+      "not_sufficient": ["google drive", "dropbox", "onedrive", "icloud", "sharepoint", "office 365", "slack", "zoom", "cloud-based tools"]
+    },
+    {
+      "skill": "aws",
+      "definition": "Amazon Web Services (AWS) is a cloud platform offering compute, storage, database, networking and managed services such as EC2, S3, Lambda and RDS.",
+      "indicators": ["ec2", "s3", "aws lambda", "cloudformation", "dynamodb", "rds", "iam roles", "cloudwatch", "sqs", "sns", "eks", "amazon ecs", "fargate", "sagemaker", "redshift", "elastic beanstalk", "route 53", "aws glue", "aws cdk"],
+      "not_sufficient": ["amazon marketplace", "amazon seller", "alexa", "amazon prime"]
+    },
+    {
+      "skill": "azure",
+      "definition": "Microsoft Azure is a cloud platform offering compute, storage, databases, identity and managed services such as AKS, Cosmos DB and Azure Functions.",
+      "indicators": ["aks", "cosmos db", "bicep", "arm templates", "entra id", "azure active directory", "azure functions", "azure devops", "azure data factory", "synapse analytics", "blob storage"],
+      "not_sufficient": ["office 365", "microsoft teams", "outlook", "sharepoint"]
+    },
+    {
+      "skill": "gcp",
+      "definition": "Google Cloud Platform (GCP) is a cloud platform offering compute, data and machine learning services such as BigQuery, Cloud Run, GKE and Vertex AI.",
+      "indicators": ["bigquery", "cloud run", "gke", "cloud functions", "pub/sub", "vertex ai", "firestore", "app engine", "cloud spanner", "dataproc"],
+      "not_sufficient": ["google drive", "google docs", "google sheets", "gmail"]
+    },
+    {
+      "skill": "serverless",
+      "definition": "Serverless computing runs application code in managed, event-driven functions or containers that scale automatically without managing servers.",
+      "indicators": ["aws lambda", "azure functions", "cloud functions", "cloud run", "fargate", "serverless framework", "step functions"],
+      "not_sufficient": ["no-code", "zapier"]
+    },
+    {
+      "skill": "backend",
+      "definition": "Backend development is building the server-side part of applications: APIs, business logic, data access, authentication and integration with databases and queues.",
+      "indicators": ["django", "flask", "fastapi", "spring boot", "express.js", "expressjs", "node.js", "nestjs", "asp.net core", "ruby on rails", "laravel", "rest api", "graphql", "grpc", "microservices", "sqlalchemy", "orm", "celery", "gunicorn"],
+      "not_sufficient": ["back office", "html", "css", "wordpress", "frontend"]
+    },
+    {
+      "skill": "frontend",
+      "definition": "Frontend development is building the client-side user interface of web applications with JavaScript frameworks, HTML and CSS, including state management and responsive layouts.",
+      "indicators": ["react", "angular", "vue.js", "svelte", "next.js", "nuxt", "redux", "tailwind", "webpack", "vite", "sass", "scss", "jquery", "responsive design", "dom manipulation", "single-page application"],
+      "not_sufficient": ["html", "css", "html email templates", "wordpress", "wix", "figma", "photoshop", "front desk", "front office", "ui design"]
+    },
+    {
+      "skill": "web development",
+      "definition": "Web development is building websites and web applications, spanning browser-side interfaces and server-side APIs.",
+      "indicators": ["react", "angular", "vue.js", "svelte", "next.js", "django", "flask", "fastapi", "express.js", "node.js", "laravel", "ruby on rails", "asp.net", "rest api", "responsive design", "single-page application"],
+      "not_sufficient": ["wix", "squarespace", "web browsing", "social media", "html email templates"]
+    },
+    {
+      "skill": "mobile development",
+      "definition": "Mobile development is building native or cross-platform applications for iOS and Android devices.",
+      "indicators": ["swift", "swiftui", "kotlin", "jetpack compose", "flutter", "react native", "xcode", "android studio", "android sdk", "ios sdk", "objective-c", "cocoapods", "android development", "ios development", "dart"],
+      "not_sufficient": ["android", "ios", "mobile phone", "smartphone", "mobile sales", "app store optimization"]
+    },
+    {
+      "skill": "rest api",
+      "definition": "REST API development is designing and implementing HTTP APIs that expose resources through standard methods, status codes and JSON payloads.",
+      "indicators": ["fastapi", "flask", "django rest framework", "express.js", "spring boot", "openapi", "swagger", "postman collections", "http endpoints", "api endpoints", "crud endpoints", "jax-rs"],
+      "not_sufficient": ["rest", "postman", "resting"]
+    },
+    {
+      "skill": "microservices",
+      "definition": "Microservices architecture structures an application as small, independently deployable services that communicate over APIs or message queues.",
+      "indicators": ["service mesh", "istio", "api gateway", "event-driven architecture", "grpc", "kafka", "rabbitmq", "domain-driven design", "saga pattern", "circuit breaker"],
+      "not_sufficient": ["docker", "kubernetes", "monolith"]
+    },
+    {
+      "skill": "database",
+      "definition": "Database skills cover designing schemas, writing queries and operating relational or NoSQL database systems.",
+      "indicators": ["postgresql", "mysql", "mongodb", "sql server", "oracle database", "sqlite", "mariadb", "redis", "cassandra", "dynamodb", "stored procedures", "query optimization"],
+      "not_sufficient": ["excel", "spreadsheets", "access to data"]
+    },
+    {
+      "skill": "relational database",
+      "definition": "Relational databases store data in tables with keys and constraints and are queried with SQL; the skill covers schema design, joins, transactions and indexing.",
+      "indicators": ["postgresql", "mysql", "sql server", "oracle database", "mariadb", "sqlite", "stored procedures", "sql joins", "foreign keys", "database normalization", "third normal form", "acid transactions", "t-sql", "pl/sql"],
+      "not_sufficient": ["excel", "spreadsheets", "mongodb"]
+    },
+    {
+      "skill": "nosql",
+      "definition": "NoSQL databases store data in non-relational models such as documents, key-value pairs, wide columns or graphs.",
+      "indicators": ["mongodb", "cassandra", "dynamodb", "couchdb", "couchbase", "redis", "neo4j", "hbase", "firestore", "document database", "key-value store"],
+      "not_sufficient": ["sql", "excel"]
+    },
+    {
+      "skill": "sql",
+      "definition": "SQL is the query language for relational databases, used to select, join, aggregate and modify data and define schemas.",
+      "indicators": ["t-sql", "pl/sql", "stored procedures", "postgresql", "mysql", "sql server", "sqlite", "mariadb", "sql joins", "window functions", "common table expressions"],
+      "not_sufficient": ["excel", "nosql", "spreadsheets"]
+    },
+    {
+      "skill": "testing",
+      "definition": "Software testing is verifying that code behaves correctly through automated unit, integration and end-to-end tests and structured test plans.",
+      "indicators": ["unit testing", "integration testing", "pytest", "junit", "jest", "mocha", "cypress", "selenium", "playwright", "test automation", "regression testing", "mockito", "unittest", "test coverage", "test-driven development"],
+      "not_sufficient": ["covid testing", "lab testing", "blood testing", "a/b testing", "drug testing", "product testing"]
+    },
+    {
+      "skill": "unit testing",
+      "definition": "Unit testing is writing automated tests that verify individual functions or classes in isolation, often with mocks.",
+      "indicators": ["pytest", "junit", "jest", "mocha", "unittest", "mockito", "nunit", "xunit", "jasmine", "rspec", "test coverage", "test-driven development"],
+      "not_sufficient": ["manual testing", "a/b testing"]
+    },
+    {
+      "skill": "e2e testing",
+      "definition": "End-to-end testing automates real user flows through a running application, usually by driving a browser.",
+      "indicators": ["cypress", "playwright", "selenium", "puppeteer", "webdriverio", "testcafe", "end-to-end testing", "end-to-end tests"],
+      "not_sufficient": ["manual testing", "user feedback"]
+    },
+    {
+      "skill": "load testing",
+      "definition": "Load testing measures how a system behaves under expected and peak traffic by simulating many concurrent users or requests.",
+      "indicators": ["jmeter", "gatling", "locust", "k6", "stress testing", "throughput benchmarking"],
+      "not_sufficient": ["load balancing", "truck loading"]
+    },
+    {
+      "skill": "performance testing",
+      "definition": "Performance testing evaluates latency, throughput and resource use of software under load to find bottlenecks.",
+      "indicators": ["jmeter", "gatling", "locust", "k6", "load testing", "stress testing", "profiling"],
+      "not_sufficient": ["performance review", "employee performance"]
+    },
+    {
+      "skill": "security testing",
+      "definition": "Security testing looks for vulnerabilities in applications and infrastructure through scanning, code analysis and penetration tests.",
+      "indicators": ["penetration testing", "burp suite", "owasp zap", "vulnerability scanning", "sast", "dast", "fuzzing", "nessus", "metasploit"],
+      "not_sufficient": ["security guard", "physical security"]
+    },
+    {
+      "skill": "cybersecurity",
+      "definition": "Cybersecurity is protecting systems, networks and data from attacks through threat detection, vulnerability management, incident response and secure configuration.",
+      "indicators": ["penetration testing", "siem", "splunk", "wireshark", "nmap", "metasploit", "burp suite", "nessus", "vulnerability assessment", "incident response", "threat modeling", "kali linux", "soc analyst", "malware analysis", "owasp", "cissp", "ceh", "comptia security+", "iso 27001", "ids/ips"],
+      "not_sufficient": ["security guard", "physical security", "security clearance", "social security", "securities", "cctv"]
+    },
+    {
+      "skill": "penetration testing",
+      "definition": "Penetration testing is authorized simulated attacks on systems to find and exploit vulnerabilities before real attackers do.",
+      "indicators": ["metasploit", "burp suite", "nmap", "kali linux", "oscp", "ceh", "ethical hacking", "exploit development", "vulnerability assessment", "red team", "bug bounty", "owasp zap"],
+      "not_sufficient": ["market penetration", "penetration rate", "sales penetration"]
+    },
+    {
+      "skill": "authentication",
+      "definition": "Authentication is verifying user or service identity, using protocols and mechanisms such as OAuth 2.0, OpenID Connect, SAML, JWTs, SSO and multi-factor authentication.",
+      "indicators": ["oauth2", "oauth 2.0", "openid connect", "oidc", "saml", "single sign-on", "sso", "multi-factor authentication", "keycloak", "auth0", "okta", "ldap", "passport.js", "bcrypt", "password hashing"],
+      "not_sufficient": ["document authentication", "signature verification", "authentic"]
+    },
+    {
+      "skill": "authorization",
+      "definition": "Authorization is controlling what an authenticated user or service may do, using models such as role-based or attribute-based access control and policy engines.",
+      "indicators": ["rbac", "role-based access control", "abac", "attribute-based access control", "access control lists", "open policy agent", "casbin", "iam policies", "oauth scopes"],
+      "not_sufficient": ["work authorization", "payment authorization", "prior authorization", "authorized to work"]
+    },
+    {
+      "skill": "encryption",
+      "definition": "Encryption protects data confidentiality by transforming it with cryptographic algorithms and managing the keys needed to decrypt it.",
+      "indicators": ["aes", "rsa", "tls", "ssl/tls", "pgp", "gpg", "key management", "kms", "end-to-end encryption", "cryptography", "openssl"],
+      "not_sufficient": ["password protected", "zip files"]
+    },
+    {
+      "skill": "siem",
+      "definition": "SIEM (security information and event management) platforms aggregate and correlate security logs to detect and investigate threats.",
+      "indicators": ["splunk", "qradar", "microsoft sentinel", "arcsight", "elastic siem", "log correlation", "security monitoring"],
+      "not_sufficient": ["cctv", "physical security"]
+    },
+    {
+      "skill": "compliance",
+      "definition": "Technical compliance is implementing and evidencing controls required by security and privacy frameworks and regulations.",
+      "indicators": ["gdpr", "hipaa", "pci dss", "soc 2", "iso 27001", "sox compliance", "nist"],
+      "not_sufficient": ["policy compliance training", "dress code"]
+    },
+    {
+      "skill": "observability",
+      "definition": "Observability is instrumenting systems with metrics, logs and traces so engineers can understand and debug their behaviour in production.",
+      "indicators": ["prometheus", "grafana", "datadog", "new relic", "opentelemetry", "jaeger", "elk stack", "loki", "distributed tracing", "splunk", "cloudwatch", "sentry"],
+      "not_sufficient": ["patient monitoring", "social media monitoring"]
+    },
+    {
+      "skill": "monitoring",
+      "definition": "Infrastructure and application monitoring is collecting metrics and alerts about system health so problems are detected and resolved quickly.",
+      "indicators": ["prometheus", "grafana", "datadog", "nagios", "zabbix", "new relic", "cloudwatch", "alertmanager", "pagerduty", "opentelemetry"],
+      "not_sufficient": ["patient monitoring", "social media monitoring", "student monitoring", "cctv"]
+    },
+    {
+      "skill": "elk stack",
+      "definition": "The ELK stack combines Elasticsearch, Logstash and Kibana to collect, index, search and visualize logs.",
+      "indicators": ["logstash", "kibana", "filebeat", "elasticsearch"],
+      "not_sufficient": ["elk hunting"]
+    },
+    {
+      "skill": "platform engineering",
+      "definition": "Platform engineering builds internal developer platforms that give product teams self-service infrastructure, deployment and tooling.",
+      "indicators": ["internal developer platform", "backstage", "crossplane", "argocd", "golden paths", "self-service infrastructure", "kubernetes operators"],
+      "not_sufficient": ["train platform", "social media platform"]
+    },
+    {
+      "skill": "agile",
+      "definition": "Agile is an iterative way of delivering software in short cycles with continuous feedback, commonly using Scrum or Kanban ceremonies and artifacts.",
+      "indicators": ["scrum", "kanban", "sprint planning", "retrospective", "daily stand-up", "daily standup", "user stories", "backlog grooming", "backlog refinement", "scrum master", "product owner", "safe framework"],
+      "not_sufficient": ["agile mindset", "fast learner", "flexible"]
+    },
+    {
+      "skill": "scrum",
+      "definition": "Scrum is an agile framework that organizes work into fixed-length sprints with defined roles and ceremonies.",
+      "indicators": ["sprint planning", "sprint review", "retrospective", "daily stand-up", "daily standup", "scrum master", "product owner", "backlog refinement", "psm"],
+      "not_sufficient": ["rugby"]
+    },
+    {
+      "skill": "project management",
+      "definition": "Project management is planning, scheduling, budgeting and coordinating work and stakeholders so a project delivers its scope on time.",
+      "indicators": ["pmp", "prince2", "gantt chart", "ms project", "microsoft project", "project plan", "milestones", "budget tracking", "resource planning", "risk register", "project manager"],
+      "not_sufficient": ["trello", "asana", "to-do lists", "school project"]
+    },
+    {
+      "skill": "leadership",
+      "definition": "Technical leadership is guiding a team's direction and delivery: leading engineers, mentoring, making decisions and owning outcomes.",
+      "indicators": ["team lead", "tech lead", "team leader", "led a team", "leading a team", "managed a team", "engineering manager", "mentored junior", "supervised a team", "head of engineering"],
+      "not_sufficient": ["leadership workshop", "leadership course", "led by", "team player"]
+    },
+    {
+      "skill": "python",
+      "definition": "Python is a general-purpose programming language widely used for web backends, data processing, automation and machine learning.",
+      "indicators": ["django", "flask", "fastapi", "pandas", "numpy", "pytest", "scikit-learn", "jupyter", "pyspark", "sqlalchemy", "celery", "pydantic", "asyncio"],
+      "not_sufficient": ["scratch", "excel macros", "anaconda"]
+    },
+    {
+      "skill": "javascript",
+      "definition": "JavaScript is the programming language of the web, used for browser interfaces and, through Node.js, for servers and tooling.",
+      "indicators": ["react", "node.js", "express.js", "expressjs", "angular", "vue.js", "typescript", "jquery", "next.js", "npm", "webpack", "es6", "dom manipulation", "svelte", "jest"],
+      "not_sufficient": ["java", "java ee", "javabeans", "html", "css"]
+    },
+    {
+      "skill": "java",
+      "definition": "Java is a statically typed, object-oriented programming language running on the JVM, widely used for enterprise backends and Android.",
+      "indicators": ["spring boot", "spring framework", "hibernate", "maven", "gradle", "jvm", "junit", "jakarta ee", "java ee", "j2ee", "jdbc", "tomcat"],
+      "not_sufficient": ["javascript", "java coffee", "indonesia"]
+    },
+    {
+      "skill": "c#",
+      "definition": "C# is a statically typed programming language on the .NET platform used for web backends, desktop applications and games.",
+      "indicators": [".net", "asp.net", "asp.net core", "entity framework", "linq", "blazor", "wpf", "xamarin", "nuget", "unity3d"],
+      "not_sufficient": ["c++", "visual basic", "c programming"]
+    }
+  ]
+}

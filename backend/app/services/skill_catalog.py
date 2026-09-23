@@ -408,6 +408,8 @@ def add_dynamic_synonym(skill_a: str, skill_b: str) -> None:
     SKILL_MATCH_VARIANTS.setdefault(second, {second}).add(first)
     _SKILL_PATTERN_CACHE.pop(first, None)
     _SKILL_PATTERN_CACHE.pop(second, None)
+    _TERM_PATTERN_CACHE.pop(first, None)
+    _TERM_PATTERN_CACHE.pop(second, None)
 
 
 def validate_catalog_skill_list(skills: list[str]) -> list[str]:
@@ -448,6 +450,18 @@ def _build_match_variants() -> dict[str, set[str]]:
 SKILL_MATCH_VARIANTS = _build_match_variants()
 
 
+def _escape_skill_variant(variant: str) -> str:
+    """
+    Escapes one skill spelling so spaces, hyphens and slashes match loosely.
+    """
+    escaped = re.escape(variant)
+    escaped = escaped.replace(r"\ ", r"\s+")
+    escaped = escaped.replace(r"\-", r"(?:-|\s+)")
+    escaped = escaped.replace("/", r"(?:/|\s+|-)")
+    escaped = escaped.replace(r"\/", r"(?:/|\s+|-)")
+    return escaped
+
+
 def build_skill_pattern(skill: str) -> re.Pattern[str]:
     """Build a token-safe skill matcher that also handles C++, C#, CI/CD, etc."""
 
@@ -480,20 +494,65 @@ def build_skill_pattern(skill: str) -> re.Pattern[str]:
         _SKILL_PATTERN_CACHE[normalized_skill] = pattern
         return pattern
 
-    variant_patterns: list[str] = []
-    for variant in sorted(SKILL_MATCH_VARIANTS.get(normalized_skill, {normalized_skill}), key=len, reverse=True):
-        escaped = re.escape(variant)
-        escaped = escaped.replace(r"\ ", r"\s+")
-        escaped = escaped.replace(r"\-", r"(?:-|\s+)")
-        escaped = escaped.replace("/", r"(?:/|\s+|-)")
-        escaped = escaped.replace(r"\/", r"(?:/|\s+|-)")
-        variant_patterns.append(escaped)
+    variant_patterns = [
+        _escape_skill_variant(variant)
+        for variant in sorted(SKILL_MATCH_VARIANTS.get(normalized_skill, {normalized_skill}), key=len, reverse=True)
+    ]
     pattern_body = "|".join(variant_patterns)
     pattern = re.compile(
         rf"(?<![\w+#./-])(?:{pattern_body})(?![\w+#/-]|\.(?=\w))",
         re.IGNORECASE,
     )
     _SKILL_PATTERN_CACHE[normalized_skill] = pattern
+    return pattern
+
+
+_TERM_PATTERN_CACHE: dict[str, re.Pattern[str]] = {}
+
+# Catalog aliases that are also everyday English words. Evidence terms never
+# expand into them, so "each node" does not count as Node.js experience.
+AMBIGUOUS_TERM_ALIASES = frozenset({"node", "torch", "chroma"})
+
+# Terms that build_skill_pattern already handles with a hand-written regex.
+_SPECIAL_SKILL_PATTERNS = frozenset({"c++", "vector database", "rest api"})
+
+
+def build_term_pattern(term: str) -> re.Pattern[str]:
+    """
+    Builds a token-safe matcher for an evidence term such as a RAG indicator.
+
+    Unlike build_skill_pattern it keeps alias spellings as literals (so
+    "express.js" does not widen to the word "express"), accepts plurals of
+    multi-word or long terms ("helm charts", "retrospectives"), version
+    suffixes ("yolov5") and "-based" style compounds ("BERT-based").
+    """
+    key = _normalized_skill_token(term)
+    cached = _TERM_PATTERN_CACHE.get(key)
+    if cached:
+        return cached
+
+    if key in _SPECIAL_SKILL_PATTERNS:
+        pattern = build_skill_pattern(key)
+    else:
+        variants = {key}
+        if SKILL_SYNONYMS.get(key, key) == key:
+            variants |= {
+                variant
+                for variant in SKILL_MATCH_VARIANTS.get(key, set())
+                if variant not in AMBIGUOUS_TERM_ALIASES
+            }
+        variant_patterns: list[str] = []
+        for variant in sorted(variants, key=len, reverse=True):
+            escaped = _escape_skill_variant(variant)
+            if " " in variant or len(variant) >= 7:
+                escaped += r"(?:e?s)?"
+            variant_patterns.append(escaped)
+        pattern = re.compile(
+            rf"(?<![\w+#./-])(?:{'|'.join(variant_patterns)})(?:v?\d+(?:\.\d+)*)?"
+            r"(?![\w+#/]|-(?!(?:based|powered|driven|enabled|backed)\b)|\.(?=\w))",
+            re.IGNORECASE,
+        )
+    _TERM_PATTERN_CACHE[key] = pattern
     return pattern
 
 

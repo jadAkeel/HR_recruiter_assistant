@@ -17,6 +17,8 @@ os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{TEST_DB_PATH.as_pos
 os.environ.setdefault("EMBEDDING_PROVIDER", "hash")
 os.environ.setdefault("LLM_PROVIDER", "rule")
 os.environ.setdefault("ALLOW_UNOWNED_RESOURCES", "true")
+# Skill-status LLM refinement would call a real local Ollama; tests mock it explicitly.
+os.environ.setdefault("SKILL_STATUS_LLM_ENABLED", "false")
 
 # Recreate SQLAlchemy engine so it picks up the env DATABASE_URL.
 from app.core import db as _db  # noqa: E402

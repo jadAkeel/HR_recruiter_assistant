@@ -37,9 +37,10 @@ def test_language_detection() -> None:
 @pytest.mark.asyncio
 async def test_dynamic_dimensions_and_arabic_routing(monkeypatch) -> None:
     """
-    Checks that Arabic texts route to multilingual model (768 dim)
-    and English texts route to standard model (384 dim).
+    Checks that Arabic texts route to the multilingual model and English texts to
+    the standard model, using a distinct multilingual dimension to tell them apart.
     """
+    monkeypatch.setattr(settings, "multilingual_embedding_dimension", 768)
     monkeypatch.setattr(settings, "embedding_provider", "hash")
     monkeypatch.setattr(settings, "auto_detect_lang", True)
     monkeypatch.setattr(settings, "use_multilingual_embedding", False)

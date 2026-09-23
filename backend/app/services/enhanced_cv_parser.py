@@ -11,6 +11,7 @@ import pdfplumber
 from docx import Document
 from rapidfuzz import fuzz
 
+from app.core.config import settings
 from app.schemas.candidate import (
     CandidateProfile,
     EducationEntry,
@@ -19,17 +20,14 @@ from app.schemas.candidate import (
     SkillLevel,
     SkillStatus,
 )
-from app.services.bilingual_llm import get_bilingual_llm_service
 from app.services.esco_service import ESCOSkillService, get_esco_service, NormalizedSkill
 from app.services.skill_catalog import (
     SKILL_KEYWORDS,
-    build_skill_pattern,
-    canonicalize_skill_name,
     normalize_text_for_skill_matching,
     skill_in_text,
     extract_uncatalogued_skills,
-    validate_catalog_skill_list,
 )
+from app.services import skill_status
 from app.services.stanza_nlp import ParsedText, parse_text_with_stanza
 
 logger = logging.getLogger(__name__)
@@ -81,22 +79,6 @@ LANGUAGE_WORDS = {
     "chinese",
 }
 
-NEGATION_INDICATORS = [
-    "don't know",
-    "do not know",
-    "no experience",
-    "not experienced",
-    "never used",
-    "haven't used",
-    "not familiar",
-    "don't have",
-    "do not have",
-    "no knowledge",
-    "currently learning",
-    "want to learn",
-    "wish to learn",
-]
-
 
 class EnhancedCVParser:
     def __init__(self, use_llm: bool = True, use_esco: bool = True) -> None:
@@ -105,17 +87,8 @@ class EnhancedCVParser:
         """
         self.use_llm = use_llm
         self.use_esco = use_esco
-        self._llm_service = None
         self._esco_service: ESCOSkillService | None = None
 
-    def _get_llm_service(self) -> Any:
-        """
-        Lazily creates the LLM service used for CV skill analysis.
-        """
-        if self._llm_service is None and self.use_llm:
-            self._llm_service = get_bilingual_llm_service()
-        return self._llm_service
-    
     def _get_esco_service(self) -> ESCOSkillService:
         """
         Lazily creates the ESCO skill service used for normalization.
@@ -293,150 +266,74 @@ class EnhancedCVParser:
         parsed_text: ParsedText | None = None,
     ) -> tuple[list[SkillDetail], list[str], list[str]]:
         """
-        Extract skills from CV text using rule-based matching with ESCO normalization.
-        
+        Extracts catalog skills with ESCO normalization; their HAS/WEAK/LEARNING/NONE
+        status comes from app.services.skill_status.
+
         Returns:
             Tuple of (skills_with_details, negative_skills, learning_skills)
         """
-        skills_found: list[SkillDetail] = []
-        skills_set: set[str] = set()
-        negative_skills: list[str] = []
-        learning_skills: list[str] = []
-        
+        found = [
+            skill
+            for skill in SKILL_KEYWORDS
+            if skill_in_text(skill, normalized_text)
+            or (" " in skill and fuzz.partial_ratio(skill.lower(), normalized_text) >= 90)
+        ]
+        statuses = skill_status.assess_cv_text(original_text, found)
+        return self._skill_details(statuses)
+
+    def _skill_details(
+        self,
+        statuses: dict[str, skill_status.SkillStatusResult],
+    ) -> tuple[list[SkillDetail], list[str], list[str]]:
+        """
+        Converts shared skill statuses into SkillDetail rows with years, level and ESCO data.
+        """
         esco = self._get_esco_service() if self.use_esco else None
-        sentences = self._sentence_candidates(original_text, parsed_text)
-
-        for skill in SKILL_KEYWORDS:
-            if not skill_in_text(skill, normalized_text):
-                if not (" " in skill and fuzz.partial_ratio(skill.lower(), normalized_text) >= 90):
-                    continue
-
-            if skill in skills_set:
-                continue
-            skills_set.add(skill)
-
-            status = SkillStatus.UNKNOWN
-            years: float | None = None
-            level = SkillLevel.UNKNOWN
-            context: str | None = None
-            confidence = 0.5
-            normalized_skill: NormalizedSkill | None = None
-
-            # Try ESCO normalization
-            if esco:
-                normalized_skill = esco.normalize_skill(skill)
-                if normalized_skill:
-                    confidence = max(confidence, normalized_skill.confidence)
-
-            best_status = SkillStatus.UNKNOWN
-            best_years: float | None = None
-            best_level = SkillLevel.UNKNOWN
-            best_confidence = 0.5
-            best_context: str | None = None
-
-            for sentence in sentences:
-                sentence_lower = self._normalize_text(sentence)
-                skill_match = build_skill_pattern(skill).search(sentence_lower)
-                if not skill_match and not (
-                    " " in skill and fuzz.partial_ratio(skill.lower(), sentence_lower) >= 90
-                ):
-                    continue
-
-                sent_context = sentence.strip()
-                sent_status = SkillStatus.UNKNOWN
-                sent_years: float | None = None
-                sent_level = SkillLevel.UNKNOWN
-                sent_confidence = 0.6
-
-                # Check for negation indicators (strong signal)
-                for neg in NEGATION_INDICATORS:
-                    if neg in sentence_lower:
-                        neg_index = sentence_lower.find(neg)
-                        skill_index = skill_match.start() if skill_match else sentence_lower.find(skill.lower())
-                        if abs(neg_index - skill_index) < 100:
-                            if "learn" in neg or "learning" in neg or "studying" in neg:
-                                sent_status = SkillStatus.LEARNING
-                            else:
-                                sent_status = SkillStatus.NO_EXPERIENCE
-                            sent_confidence = 0.85
-                            break
-
-                # Extract years of experience
-                year_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:year|yr|years|yrs)", sentence_lower)
-                if year_match and sent_status == SkillStatus.UNKNOWN:
-                    sent_years = float(year_match.group(1))
-                    if sent_years >= 5:
-                        sent_level = SkillLevel.SENIOR
-                    elif sent_years >= 2:
-                        sent_level = SkillLevel.MID
-                    else:
-                        sent_level = SkillLevel.JUNIOR
-                    sent_confidence = 0.75
-                    sent_status = SkillStatus.HAS_EXPERIENCE
-
-                if sent_status == SkillStatus.UNKNOWN:
-                    sent_status = SkillStatus.HAS_EXPERIENCE
-
-                # Keep sentence with highest priority: HAS_EXPERIENCE > LEARNING > NO_EXPERIENCE > UNKNOWN
-                priority = {SkillStatus.HAS_EXPERIENCE: 3, SkillStatus.LEARNING: 2, SkillStatus.NO_EXPERIENCE: 1, SkillStatus.UNKNOWN: 0}
-                if priority.get(sent_status, 0) > priority.get(best_status, 0):
-                    best_status = sent_status
-                    best_years = sent_years
-                    best_level = sent_level
-                    best_confidence = sent_confidence
-                    best_context = sent_context
-
-                # If we found HAS_EXPERIENCE with years, no need to look further
-                if best_status == SkillStatus.HAS_EXPERIENCE and best_years is not None:
-                    break
-
-            status = best_status
-            years = best_years
-            level = best_level
-            confidence = best_confidence
-            context = best_context
-
-            if status == SkillStatus.LEARNING:
-                learning_skills.append(skill)
-            elif status == SkillStatus.NO_EXPERIENCE:
-                negative_skills.append(skill)
-
-            skill_detail = SkillDetail(
-                name=skill,
-                level=level,
+        fields = skill_status.to_profile_fields(statuses)
+        skills_found: list[SkillDetail] = []
+        for stored in fields["skills_detailed"]:
+            result = statuses[stored["name"]]
+            years, level = self._years_and_level(result)
+            detail = SkillDetail(
+                **stored | {"confidence": self._status_confidence(result, years)},
                 years=years,
-                status=status,
-                confidence=confidence,
-                context=context,
+                level=level,
             )
-            
-            # Add ESCO metadata if available
+            normalized_skill: NormalizedSkill | None = esco.normalize_skill(detail.name) if esco else None
             if normalized_skill:
-                skill_detail.esco_uri = normalized_skill.esco_uri
-                skill_detail.preferred_label = normalized_skill.preferred_label
-                skill_detail.category = normalized_skill.category
-            
-            skills_found.append(skill_detail)
-
-        return skills_found, negative_skills, learning_skills
+                detail.esco_uri = normalized_skill.esco_uri
+                detail.preferred_label = normalized_skill.preferred_label
+                detail.category = normalized_skill.category
+            skills_found.append(detail)
+        return skills_found, fields["negative_skills"], fields["learning_skills"]
 
     @staticmethod
-    def _sentence_candidates(text: str, parsed_text: ParsedText | None = None) -> list[str]:
+    def _years_and_level(result: skill_status.SkillStatusResult) -> tuple[float | None, SkillLevel]:
         """
-        Builds unique sentence candidates from regex and Stanza parsing.
+        Reads "N years" from the HAS evidence sentences of a skill.
         """
-        parsed_text = parsed_text or parse_text_with_stanza(text)
-        regex_sentences = [part.strip() for part in re.split(r"[.!?\n]", text) if part.strip()]
-        stanza_sentences = parsed_text.sentences if parsed_text.parser == "stanza" else []
+        if result.status != skill_status.HAS:
+            return None, SkillLevel.UNKNOWN
+        for item in result.evidence:
+            if item.status != skill_status.HAS:
+                continue
+            year_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:year|yr|years|yrs)", (item.evidence_sentence or "").lower())
+            if year_match:
+                years = float(year_match.group(1))
+                level = SkillLevel.SENIOR if years >= 5 else SkillLevel.MID if years >= 2 else SkillLevel.JUNIOR
+                return years, level
+        return None, SkillLevel.UNKNOWN
 
-        sentences: list[str] = []
-        seen: set[str] = set()
-        for sentence in regex_sentences + stanza_sentences:
-            key = " ".join(sentence.lower().split())
-            if key and key not in seen:
-                seen.add(key)
-                sentences.append(sentence)
-        return sentences
+    @staticmethod
+    def _status_confidence(result: skill_status.SkillStatusResult, years: float | None) -> float:
+        """
+        Confidence of the extracted status: explicit statements > years > bare mentions.
+        """
+        if result.status != skill_status.HAS and result.matched:
+            return 0.85
+        if years is not None:
+            return 0.75
+        return 0.6 if result.evidence_sentence else 0.5
 
     async def _extract_skills_with_llm(
         self,
@@ -444,172 +341,25 @@ class EnhancedCVParser:
         parsed_text: ParsedText | None = None,
     ) -> tuple[list[SkillDetail], list[str], list[str]]:
         """
-        Combines rule-based skills with grounded LLM skill analysis.
+        Rule-based extraction, then the local LLM only for the (skill, sentence) items
+        no rule resolved. The whole CV is never sent to the model; if it is down or
+        slow, the rule results are kept.
         """
-        llm_service = self._get_llm_service()
-        if llm_service is None:
-            return self._extract_skills_rule_based(self._normalize_text(text), text, parsed_text)
-
-        try:
-            rule_based_skills, rule_based_negative, rule_based_learning = self._extract_skills_rule_based(
-                self._normalize_text(text),
-                text,
-                parsed_text,
-            )
-            analysis = await llm_service.analyze_cv_skills(text)
-            raw_skills = analysis.get("skills_with_context", [])
-
-            if not raw_skills:
-                logger.warning("LLM returned no skills, falling back to rule-based")
-                return rule_based_skills, rule_based_negative, rule_based_learning
-
-            skills_found: list[SkillDetail] = []
-            negative_skills = self._grounded_llm_list(analysis.get("negative_skills", []), text)
-            learning_skills = self._grounded_llm_list(analysis.get("learning_skills", []), text)
-
-            for skill_data in raw_skills:
-                if not isinstance(skill_data, dict):
-                    continue
-                catalog_skill = canonicalize_skill_name(
-                    str(skill_data.get("skill") or skill_data.get("name") or "")
-                )
-                if not catalog_skill:
-                    logger.warning(
-                        "Discarded non-catalog LLM CV skill",
-                        extra={"skill": str(skill_data.get("skill", ""))[:80]},
-                    )
-                    continue
-                if not self._llm_skill_is_grounded(skill_data, text):
-                    logger.warning(
-                        "Discarded ungrounded LLM CV skill",
-                        extra={"skill": str(skill_data.get("skill", ""))[:80]},
-                    )
-                    continue
-                status_map = {
-                    "has_experience": SkillStatus.HAS_EXPERIENCE,
-                    "learning": SkillStatus.LEARNING,
-                    "no_experience": SkillStatus.NO_EXPERIENCE,
-                }
-                level_map = {
-                    "junior": SkillLevel.JUNIOR,
-                    "mid": SkillLevel.MID,
-                    "senior": SkillLevel.SENIOR,
-                    "expert": SkillLevel.EXPERT,
-                }
-
-                skill_detail = SkillDetail(
-                    name=catalog_skill,
-                    level=level_map.get(skill_data.get("level", "unknown"), SkillLevel.UNKNOWN),
-                    years=skill_data.get("years"),
-                    status=status_map.get(skill_data.get("status", "unknown"), SkillStatus.UNKNOWN),
-                    confidence=skill_data.get("confidence", 0.5),
-                    context=skill_data.get("context"),
-                )
-                skills_found.append(skill_detail)
-
-            if not skills_found:
-                logger.warning("LLM returned no grounded skills, falling back to rule-based")
-                return rule_based_skills, rule_based_negative, rule_based_learning
-
-            return (
-                self._merge_skill_details(skills_found, rule_based_skills),
-                validate_catalog_skill_list(negative_skills + rule_based_negative),
-                validate_catalog_skill_list(learning_skills + rule_based_learning),
-            )
-
-        except Exception as e:
-            logger.error("LLM skill extraction failed", extra={"error_type": type(e).__name__})
-            return self._extract_skills_rule_based(self._normalize_text(text), text, parsed_text)
-
-    @staticmethod
-    def _merge_skill_details(
-        primary: list[SkillDetail],
-        fallback: list[SkillDetail],
-    ) -> list[SkillDetail]:
-        """
-        Merges LLM and rule-based skill details while keeping stronger evidence.
-        """
-        merged: dict[str, SkillDetail] = {}
-        for detail in primary + fallback:
-            normalized = canonicalize_skill_name(detail.name)
-            if not normalized:
-                continue
-            existing = merged.get(normalized)
-            if existing is None:
-                merged[normalized] = detail.model_copy(update={"name": normalized})
-                continue
-
-            priority = {
-                SkillStatus.HAS_EXPERIENCE: 3,
-                SkillStatus.UNKNOWN: 2,
-                SkillStatus.LEARNING: 1,
-                SkillStatus.NO_EXPERIENCE: 0,
-            }
-            if priority.get(detail.status, -1) > priority.get(existing.status, -1):
-                merged[normalized] = detail.model_copy(update={"name": normalized})
-        return list(merged.values())
-
-    @staticmethod
-    def _normalize_llm_list(items: list[Any]) -> list[str]:
-        """
-        Normalizes LLM skill list output into plain skill names.
-        """
-        if not isinstance(items, list):
-            return []
-        normalized: list[str] = []
-        for item in items:
-            if isinstance(item, str):
-                normalized.append(item)
-            elif isinstance(item, dict):
-                name = item.get("skill") or item.get("name")
-                if name:
-                    normalized.append(str(name))
-        return normalized
-
-    def _grounded_llm_list(self, items: list[Any], text: str) -> list[str]:
-        """
-        Keeps only LLM-listed skills that are grounded in the CV text.
-        """
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for skill in self._normalize_llm_list(items):
-            skill_name = canonicalize_skill_name(skill)
-            if not skill_name or skill_name in seen:
-                continue
-            if self._skill_name_is_grounded(skill_name, text):
-                seen.add(skill_name)
-                normalized.append(skill_name)
-        return normalized[:100]
-
-    def _llm_skill_is_grounded(self, skill_data: dict[str, Any], text: str) -> bool:
-        """
-        Checks whether one LLM skill extraction has text evidence in the CV.
-        """
-        skill_name = canonicalize_skill_name(str(skill_data.get("skill") or skill_data.get("name") or ""))
-        if not skill_name:
-            return False
-        if self._skill_name_is_grounded(skill_name, text):
-            return True
-        context = str(skill_data.get("context") or "").strip()
-        if not context:
-            return False
-        normalized_text = self._normalize_text(text)
-        normalized_context = self._normalize_text(context)
-        return bool(
-            normalized_context
-            and normalized_context in normalized_text
-            and skill_in_text(skill_name, normalized_context)
-        )
-
-    def _skill_name_is_grounded(self, skill_name: str, text: str) -> bool:
-        """
-        Checks whether a canonical skill appears in the CV text.
-        """
-        normalized_text = self._normalize_text(text)
-        normalized_skill = canonicalize_skill_name(skill_name)
-        if not normalized_skill:
-            return False
-        return skill_in_text(normalized_skill, normalized_text)
+        normalized = self._normalize_text(text)
+        found = [
+            skill
+            for skill in SKILL_KEYWORDS
+            if skill_in_text(skill, normalized)
+            or (" " in skill and fuzz.partial_ratio(skill.lower(), normalized) >= 90)
+        ]
+        statuses = skill_status.assess_cv_text(text, found)
+        if settings.skill_status_llm_enabled:
+            try:
+                summary = await skill_status.refine_results(statuses)
+                logger.info("Skill status LLM refinement", extra=summary)
+            except skill_status.LLMUnavailable as exc:
+                logger.warning("Skill status LLM unavailable; keeping rule results", extra={"error": str(exc)[:200]})
+        return self._skill_details(statuses)
 
     def _parse_experience_entries(self, experience_lines: list[str]) -> list[ExperienceEntry]:
         """
@@ -853,11 +603,14 @@ class EnhancedCVParser:
         """
         text = self._ensure_parseable_text(text)
         normalized = self._normalize_text(text)
-        parsed_text = self._parse_text_for_nlp(text)
-        if self.use_llm and self._get_llm_service():
+        # Sentence parsing and rule matching are CPU-bound; keep them off the event loop.
+        parsed_text = await asyncio.to_thread(self._parse_text_for_nlp, text)
+        if self.use_llm:
             skills_detailed, negative_skills, learning_skills = await self._extract_skills_with_llm(text, parsed_text)
         else:
-            skills_detailed, negative_skills, learning_skills = self._extract_skills_rule_based(normalized, text, parsed_text)
+            skills_detailed, negative_skills, learning_skills = await asyncio.to_thread(
+                self._extract_skills_rule_based, normalized, text, parsed_text
+            )
 
         uncatalogued_skills = extract_uncatalogued_skills(text, [skill.name for skill in skills_detailed])
         return self._build_profile(text, skills_detailed, negative_skills, learning_skills, uncatalogued_skills)

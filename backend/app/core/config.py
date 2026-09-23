@@ -21,8 +21,14 @@ class Settings(BaseSettings):
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     multilingual_embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     embedding_dimension: int = 384
+    # paraphrase-multilingual-MiniLM-L12-v2 outputs 384 dims; change with the model.
+    multilingual_embedding_dimension: int = 384
     use_multilingual_embedding: bool = False
     auto_detect_lang: bool = True
+    # Download missing HuggingFace models (embeddings, faster-whisper) on first use.
+    # Unset = only in production; elsewhere a missing model fails fast and the caller
+    # falls back (pre-fetch with scripts/download_models.py).
+    allow_model_download: bool | None = None
 
     # Timeouts and retries for AI/LLM calls
     ai_request_timeout_seconds: float = 45.0
@@ -39,6 +45,20 @@ class Settings(BaseSettings):
     esco_api_enabled: bool = False
     esco_data_path: str = "backend/data/esco_skills.json"
     extra_skills_path: str = "backend/data/extra_skills.json"
+
+    # RAG skill enrichment: partial credit for umbrella skills proven by indicators
+    rag_enrichment_enabled: bool = True
+    rag_auto_seed: bool = True
+    skill_knowledge_path: str = "backend/data/skill_knowledge.json"
+    rag_seed_multilingual: bool = False
+    rag_min_indicators: int = 2
+    # Calibrated on the tuning split of tests/fixtures/rag_skill_cases.jsonl with
+    # all-MiniLM-L6-v2 (max F0.5, ties -> stricter). Only single-indicator cases
+    # depend on it; re-run scripts/benchmark_rag_enrichment.py --sweep before
+    # changing it or the embedding model.
+    rag_chunk_similarity_threshold: float = 0.34
+    rag_match_confidence: float = 0.60
+    rag_max_chunks: int = 120
 
     # Auth / JWT
     jwt_secret_key: str = DEFAULT_JWT_SECRET
@@ -67,6 +87,8 @@ class Settings(BaseSettings):
     # CORS and security
     cors_origins_str: str = "http://localhost:5173,http://localhost:5174,http://localhost:3000"
     trusted_hosts_str: str = "localhost,127.0.0.1,testserver"
+    # Accept any ngrok / localhost.run origin and host outside production (opt-in).
+    cors_allow_tunnels: bool = False
     rate_limit_enabled: bool = True
     rate_limit_requests: int = 1200
     rate_limit_window_seconds: int = 60
@@ -76,6 +98,13 @@ class Settings(BaseSettings):
     max_audio_upload_bytes: int = 10 * 1024 * 1024
     voice_request_timeout_seconds: float = 20.0
     security_headers_enabled: bool = True
+
+    # Skill status (HAS/WEAK/LEARNING/NONE): rules at upload, then a background
+    # LLM pass over the sentences no rule resolved.
+    skill_status_llm_enabled: bool = True
+    skill_status_llm_timeout_seconds: float = 60.0
+    skill_status_llm_batch_size: int = 20
+    skill_status_llm_max_items: int = 40
 
     # Model names for different Ollama tasks
     ollama_model: str = "llama3.2"

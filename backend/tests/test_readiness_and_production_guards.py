@@ -116,3 +116,90 @@ def test_production_ollama_embedding_constructs_without_hash_fallback(monkeypatc
     embedding_module._get_cached_embedding_service.cache_clear()
 
     assert service is not None
+
+
+def _preflight(client: TestClient, origin: str):
+    return client.options(
+        "/api/v1/candidates",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://x.onrender.com",
+        "https://attacker.ngrok-free.app",
+        "https://abcd.lhr.life",
+        "http://localhost.attacker.com",
+    ],
+)
+def test_development_cors_rejects_foreign_origins_by_default(monkeypatch: pytest.MonkeyPatch, origin: str) -> None:
+    monkeypatch.setattr(settings, "environment", "development")
+    monkeypatch.setattr(settings, "cors_allow_tunnels", False)
+    client = TestClient(create_app())
+
+    response = _preflight(client, origin)
+
+    assert response.status_code == 400
+    assert "access-control-allow-origin" not in response.headers
+
+
+@pytest.mark.parametrize("origin", ["http://localhost:4321", "http://127.0.0.1:8080", "http://localhost"])
+def test_development_cors_allows_any_localhost_port(monkeypatch: pytest.MonkeyPatch, origin: str) -> None:
+    monkeypatch.setattr(settings, "environment", "development")
+    monkeypatch.setattr(settings, "cors_allow_tunnels", False)
+    client = TestClient(create_app())
+
+    response = _preflight(client, origin)
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == origin
+
+
+def test_development_cors_allows_tunnels_only_when_opted_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "environment", "development")
+    monkeypatch.setattr(settings, "cors_allow_tunnels", True)
+    client = TestClient(create_app())
+
+    assert _preflight(client, "https://my-tunnel.ngrok-free.app").status_code == 200
+    assert _preflight(client, "https://abcd.lhr.life").status_code == 200
+    assert _preflight(client, "https://x.onrender.com").status_code == 400
+    assert _preflight(client, "https://my-tunnel.ngrok-free.app.attacker.com").status_code == 400
+
+
+def test_production_ignores_tunnel_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "cors_allow_tunnels", True)
+    monkeypatch.setattr(settings, "cors_origins_str", "https://trusted-frontend.onrender.com")
+    client = TestClient(create_app())
+
+    assert _preflight(client, "https://my-tunnel.ngrok-free.app").status_code == 400
+    assert _preflight(client, "http://localhost:5173").status_code == 400
+    assert client.get("/health", headers={"Host": "my-tunnel.ngrok-free.app"}).status_code == 400
+
+
+def test_trusted_hosts_exclude_tunnel_and_render_wildcards_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "environment", "development")
+    monkeypatch.setattr(settings, "cors_allow_tunnels", False)
+    monkeypatch.delenv("RENDER_EXTERNAL_HOSTNAME", raising=False)
+    client = TestClient(create_app())
+
+    assert client.get("/health", headers={"Host": "localhost"}).status_code == 200
+    assert client.get("/health", headers={"Host": "attacker.onrender.com"}).status_code == 400
+    assert client.get("/health", headers={"Host": "attacker.ngrok-free.app"}).status_code == 400
+
+
+def test_trusted_hosts_accept_tunnels_when_opted_in_and_own_render_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "environment", "development")
+    monkeypatch.setattr(settings, "cors_allow_tunnels", True)
+    monkeypatch.setenv("RENDER_EXTERNAL_HOSTNAME", "my-api.onrender.com")
+    client = TestClient(create_app())
+
+    assert client.get("/health", headers={"Host": "my-tunnel.ngrok-free.app"}).status_code == 200
+    assert client.get("/health", headers={"Host": "my-api.onrender.com"}).status_code == 200
+    assert client.get("/health", headers={"Host": "attacker.onrender.com"}).status_code == 400

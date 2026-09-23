@@ -8,7 +8,9 @@ services:
     runtime: python
     plan: free
     rootDir: backend
-    buildCommand: pip install -r requirements-prod.txt
+    # Pre-fetch embedding weights at build time so the first request never downloads
+    # them. Non-fatal: production still downloads on first use if this step fails.
+    buildCommand: pip install -r requirements-prod.txt && (python scripts/download_models.py --skip-whisper --no-load-check || echo "WARNING - model pre-download failed; models will download on first use")
     startCommand: alembic upgrade head && gunicorn app.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120
     healthCheckPath: /api/v1/health
     envVars:
@@ -25,11 +27,10 @@ services:
         value: production
       - key: JWT_SECRET_KEY
         generateValue: true
+      # fromService has no `url` property (only host/port/hostport/...), and CORS needs
+      # the full origin, so the frontend URL is set explicitly.
       - key: CORS_ORIGINS_STR
-        fromService:
-          name: ai-recruiter-frontend
-          type: web
-          property: url
+        value: "https://ai-recruiter-frontend.onrender.com"
       - key: TRUSTED_HOSTS_STR
         value: "localhost,127.0.0.1"
       - key: RUN_CV_WORKER_IN_API
@@ -50,21 +51,26 @@ services:
         value: "openai"
       - key: OPENAI_API_KEY
         sync: false # Set this in the Render Dashboard after deploying
+      # Keep the HuggingFace cache inside the project dir so build-time downloads
+      # are still there at runtime.
+      - key: HF_HOME
+        value: /opt/render/project/src/backend/.hf_cache
+      # Render Free has 512 MB RAM: a second (multilingual, ~470 MB) model would OOM,
+      # so Arabic text uses the standard model. Remove on a larger instance.
+      - key: AUTO_DETECT_LANG
+        value: "false"
 
   # Frontend Web Service (Vite + React + TS)
   - type: web
     name: ai-recruiter-frontend
     runtime: static
-    plan: free
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
     envVars:
+      # Must be a full URL: the client treats anything not starting with http as a path.
       - key: VITE_API_BASE_URL
-        fromService:
-          name: ai-recruiter-backend
-          type: web
-          property: url
+        value: "https://ai-recuriter-yoy5.onrender.com/api/v1"
     routes:
       # SPA fallback: serve index.html for all client-side routes
       - type: rewrite
