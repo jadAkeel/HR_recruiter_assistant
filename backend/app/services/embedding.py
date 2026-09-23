@@ -5,7 +5,7 @@ import hashlib
 import logging
 import math
 from collections import OrderedDict
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 import numpy as np
 
@@ -56,10 +56,26 @@ class LocalEmbeddingService:
     def __init__(self, model_name: str) -> None:
         """
         Initializes the local sentence-transformer embedding model.
+
+        A fully cached model loads with local_files_only so startup never touches the
+        network. A missing model raises immediately unless downloads are allowed,
+        instead of blocking the caller on a HuggingFace download.
         """
         # USE_TF / TRANSFORMERS_NO_TF are set in app/__init__.py, before stanza imports transformers.
+        from app.services.model_cache import (
+            ModelNotCachedError,
+            is_sentence_transformer_cached,
+            missing_model_message,
+            model_downloads_allowed,
+        )
+
+        cached = is_sentence_transformer_cached(model_name)
+        if not cached and not model_downloads_allowed():
+            raise ModelNotCachedError(missing_model_message(model_name))
+        if not cached:
+            logger.warning("Embedding model %s is not cached; downloading from HuggingFace", model_name)
         from sentence_transformers import SentenceTransformer
-        self.model = SentenceTransformer(model_name)
+        self.model = SentenceTransformer(model_name, local_files_only=cached)
         logger.info("Loaded sentence-transformers model %s", model_name)
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
@@ -429,9 +445,29 @@ def embedding_metadata_for_text(text: str, provider: str | None = None) -> dict[
 class LanguageRoutingEmbeddingService:
     """Routes Arabic text to multilingual embeddings while keeping English on the standard model."""
 
-    def __init__(self, standard: EmbeddingProvider, multilingual: EmbeddingProvider) -> None:
+    def __init__(
+        self,
+        standard: EmbeddingProvider | Callable[[], EmbeddingProvider],
+        multilingual: EmbeddingProvider | Callable[[], EmbeddingProvider],
+    ) -> None:
+        """
+        Accepts providers or factories; factories are built on first use in a worker
+        thread, so English-only traffic never loads the multilingual model and a slow
+        model load never stalls the event loop.
+        """
         self._standard = standard
         self._multilingual = multilingual
+
+    @staticmethod
+    async def _resolve(provider: EmbeddingProvider | Callable[[], EmbeddingProvider]) -> EmbeddingProvider:
+        """
+        Returns a ready provider, building it off the event loop when given a factory.
+        """
+        if hasattr(provider, "embed"):
+            return provider
+        import asyncio
+
+        return await asyncio.to_thread(provider)
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         standard_items: list[tuple[int, str]] = []
@@ -444,10 +480,12 @@ class LanguageRoutingEmbeddingService:
 
         results: list[list[float] | None] = [None] * len(texts)
         if standard_items:
+            self._standard = await self._resolve(self._standard)
             embeddings = await self._standard.embed([text for _, text in standard_items])
             for (index, _), embedding in zip(standard_items, embeddings):
                 results[index] = embedding
         if multilingual_items:
+            self._multilingual = await self._resolve(self._multilingual)
             embeddings = await self._multilingual.embed([text for _, text in multilingual_items])
             for (index, _), embedding in zip(multilingual_items, embeddings):
                 results[index] = embedding
@@ -517,7 +555,7 @@ def get_embedding_service() -> EmbeddingProvider:
     if settings.auto_detect_lang:
         return LanguageRoutingEmbeddingService(
             get_standard_embedding_service(),
-            get_multilingual_embedding_service(),
+            get_multilingual_embedding_service,
         )
     return get_standard_embedding_service()
 

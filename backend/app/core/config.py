@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     embedding_dimension: int = 384
     use_multilingual_embedding: bool = False
     auto_detect_lang: bool = True
+    # Download missing HuggingFace models (embeddings, faster-whisper) on first use.
+    # Unset = only in production; elsewhere a missing model fails fast and the caller
+    # falls back (pre-fetch with scripts/download_models.py).
+    allow_model_download: bool | None = None
 
     # Timeouts and retries for AI/LLM calls
     ai_request_timeout_seconds: float = 45.0

@@ -210,6 +210,9 @@ Ollama models are pulled automatically on startup: `llama3.2`, `gemma3:4b`, `nom
 | `DATABASE_URL` | `sqlite+aiosqlite:///./app.db` | Database connection string |
 | `EMBEDDING_PROVIDER` | `hash` | `hash`, `sentence-transformers`, or `ollama` |
 | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Sentence-transformers model name |
+| `AUTO_DETECT_LANG` | `true` | Route Arabic text to `MULTILINGUAL_EMBEDDING_MODEL` (loaded lazily on the first Arabic text) |
+| `MULTILINGUAL_EMBEDDING_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | 768-dim model for Arabic text |
+| `ALLOW_MODEL_DOWNLOAD` | unset (= only in production) | Download missing HuggingFace models on first use. Otherwise a missing model fails fast and falls back; pre-fetch with `python scripts/download_models.py`. `HF_HUB_OFFLINE=1` always disables downloads |
 | `LLM_PROVIDER` | `ollama` | LLM provider for parsing & interviews |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
 | `OLLAMA_MODEL` | `llama3.2` | Default LLM model |

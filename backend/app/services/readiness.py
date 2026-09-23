@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.core.db import check_db_connection
 from app.core.redis import get_redis
 from app.services.embedding import embedding_runtime_status, get_embedding_service
+from app.services.model_cache import is_sentence_transformer_cached, missing_model_message, model_downloads_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,17 @@ async def _check_embedding_provider() -> dict[str, Any]:
     }
     fallbacks = {model: status for model, status in models.items() if status["active_provider"] != provider}
     extra: dict[str, Any] = {"provider": provider, "models": models}
+
+    multilingual_model = settings.multilingual_embedding_model
+    if settings.auto_detect_lang or settings.use_multilingual_embedding:
+        cached = is_sentence_transformer_cached(multilingual_model)
+        extra["multilingual_model_cached"] = cached
+        if not cached and multilingual_model not in models and not model_downloads_allowed():
+            fallbacks[multilingual_model] = {
+                "configured_provider": provider,
+                "active_provider": "hash",
+                "fallback_reason": missing_model_message(multilingual_model),
+            }
 
     if fallbacks:
         extra["fallback_provider"] = "hash"
