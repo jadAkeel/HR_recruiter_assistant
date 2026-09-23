@@ -139,6 +139,15 @@ _NEGATION_CUE = re.compile(
 )
 
 
+def has_absence_or_learning_cue(text: str) -> bool:
+    """
+    Checks already-scoped text (e.g. the clause around a RAG indicator) for a NONE
+    or LEARNING rule, so callers share this module's vocabulary.
+    """
+    normalized = normalize_for_rules(text)
+    return any(rule.search(normalized) for rule in _NONE_RULES + _LEARNING_RULES)
+
+
 @dataclass
 class SkillAssessment:
     skill: str

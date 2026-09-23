@@ -10,6 +10,7 @@ This module provides a sophisticated matching system that combines:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
@@ -26,6 +27,7 @@ from app.services.esco_service import ESCOSkillService, get_esco_service, Normal
 from app.services.embedding import (
     EmbeddingProvider,
     embedding_metadata_for_text,
+    embedding_model_name_for_provider,
     get_embedding_service,
     is_embedding_quality_text,
     is_hash_fallback_vector,
@@ -34,6 +36,7 @@ from app.services.embedding import (
 from app.services.skill_catalog import (
     SYNONYM_MAP,
     build_skill_pattern,
+    build_term_pattern,
     is_job_skill_name,
     normalize_skill_name,
 )
@@ -334,6 +337,87 @@ BROAD_SKILL_TERMS = {
 }
 
 
+# RAG enrichment is weak evidence: it may never outrank a named skill.
+RAG_MAX_CONFIDENCE = 0.60
+RAG_EVIDENCE_CACHE_SIZE = 512
+RAG_CHUNK_MAX_CHARS = 400
+
+# Learning or absence phrases the skill_status NONE/LEARNING rules do not cover.
+# Matched against skill_status.normalize_for_rules() text, so contractions are expanded.
+RAG_LEARNING_CONTEXT = re.compile(
+    r"(?:(?:plan(?:ning)?|hop(?:e|ing)|want(?:ing)?|would\s+like|eager|looking|intend(?:ing)?|aim(?:ing)?)"
+    r"\s+to\s+(?:learn|study|explore|try)|interested\s+in\s+learning|learning\s+(?:about|the\s+basics)|"
+    r"basics\s+of|(?:have|has)\s+not\s+(?:yet\s+)?(?:built|used|worked)|"
+    r"(?:do|does|did)\s+not\s+have\b|never\s+(?:built|worked))",
+    re.IGNORECASE,
+)
+# A PDF line wrap (no sentence punctuation, next line lowercase) is not a sentence break.
+_RAG_WRAPPED_LINE = re.compile(r"(?<![.!?:;])\n(?=[a-z(])")
+_RAG_SENTENCE_BREAK = re.compile(
+    r"\n+|(?<=[.!?])\s+(?=[A-Z0-9(\"'])|\s*[;•▪●|]\s*|\s+[-–—]\s+"
+)
+_RAG_CLAUSE_BREAK = re.compile(r",?\s+(?:but|though|although|however|whereas|except)\s+", re.IGNORECASE)
+
+
+@dataclass
+class _RagCandidateEvidence:
+    """Sentence chunks of one candidate's evidence, plus lazily computed embeddings."""
+    chunks: list[str]
+    lowered: list[str]
+    joined: str
+    positive_skills: set[str]
+    embeddings: list[list[float]] | None = None
+    embedding_attempted: bool = False
+
+
+def _split_long_chunk(text: str) -> list[str]:
+    """
+    Splits an over-long sentence on word boundaries so one chunk stays focused.
+    """
+    text = " ".join(text.split())
+    if len(text) <= RAG_CHUNK_MAX_CHARS:
+        return [text] if text else []
+    parts: list[str] = []
+    current: list[str] = []
+    length = 0
+    for word in text.split(" "):
+        if current and length + len(word) + 1 > RAG_CHUNK_MAX_CHARS:
+            parts.append(" ".join(current))
+            current, length = [], 0
+        current.append(word)
+        length += len(word) + 1
+    if current:
+        parts.append(" ".join(current))
+    return parts
+
+
+def _in_non_evidence_context(chunk: str, start: int, end: int) -> bool:
+    """
+    Checks the clause around a term (within the usual 80-char window) for
+    negation or learning-only phrasing.
+    """
+    clause_start, clause_end = 0, len(chunk)
+    for boundary in _RAG_CLAUSE_BREAK.finditer(chunk):
+        if boundary.end() <= start:
+            clause_start = boundary.end()
+        elif boundary.start() >= end:
+            clause_end = boundary.start()
+            break
+    window = chunk[max(clause_start, start - 80): min(clause_end, end + 80)]
+    return skill_status.has_absence_or_learning_cue(window) or bool(
+        RAG_LEARNING_CONTEXT.search(skill_status.normalize_for_rules(window))
+    )
+
+
+def _truncate_chunk(chunk: str | None, limit: int = 240) -> str | None:
+    """
+    Shortens an evidence chunk for storage in match reasoning.
+    """
+    if chunk is None or len(chunk) <= limit:
+        return chunk
+    return chunk[: limit - 3].rstrip() + "..."
+
+
 @dataclass
 class SkillMatch:
     """Represents a matched skill with details."""
@@ -379,6 +463,9 @@ class SkillMatchResult:
     rag_enriched_skills: list[str] = field(default_factory=list)
     # Skills the CV says the candidate does not have (status NONE), with evidence.
     rejected_by_status: list[dict[str, Any]] = field(default_factory=list)
+    # Why each RAG partial credit was granted, and near misses that were refused.
+    rag_evidence: dict[str, dict[str, Any]] = field(default_factory=dict)
+    rag_rejected: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """
@@ -395,6 +482,7 @@ class SkillMatchResult:
             "esco_coverage": round(self.esco_coverage, 4),
             "rag_matched_count": self.rag_matched_count,
             "rag_enriched_skills": self.rag_enriched_skills,
+            "rag_evidence": self.rag_evidence,
         }
 
 
@@ -415,6 +503,7 @@ class MatchReasoning:
     missing_skills: list[str] = field(default_factory=list)
     rag_matched_count: int = 0
     rag_enriched_skills: list[str] = field(default_factory=list)
+    rag_evidence: dict[str, dict[str, Any]] = field(default_factory=dict)
     strengths: list[str] = field(default_factory=list)
     gaps: list[str] = field(default_factory=list)
     overqualified: bool = False
@@ -440,6 +529,7 @@ class MatchReasoning:
             "missing_skills": self.missing_skills,
             "rag_matched_count": self.rag_matched_count,
             "rag_enriched_skills": self.rag_enriched_skills,
+            "rag_evidence": self.rag_evidence,
             "strengths": self.strengths,
             "gaps": self.gaps,
             "overqualified": self.overqualified,
@@ -492,6 +582,7 @@ class HybridMatchResult:
             "missing_skills": reas.missing_skills,
             "rag_matched_count": reas.rag_matched_count,
             "rag_enriched_skills": reas.rag_enriched_skills,
+            "rag_evidence": reas.rag_evidence,
             "strengths": reas.strengths,
             "gaps": reas.gaps,
             "overqualified": reas.overqualified,
@@ -528,6 +619,9 @@ class HybridMatchingEngine:
         self.embedder = embedding_service or get_embedding_service()
         self.weights = {**DEFAULT_WEIGHTS, **(weights or {})}
         self._historical_feedback: set[tuple[str, str]] = set()
+        self._rag_knowledge_cache: dict[str, Any] = {}
+        self._rag_definition_cache: dict[str, list[float]] = {}
+        self._rag_evidence_cache: dict[str, _RagCandidateEvidence] = {}
     
     async def match(
         self,
@@ -979,78 +1073,250 @@ class HybridMatchingEngine:
         session: AsyncSession,
     ) -> None:
         """
-        Uses RAG skill definitions to create weak matches for otherwise missing skills.
-        """
-        try:
-            from app.services.rag import get_skill_definitions
+        Grants capped partial credit for missing umbrella skills proven by evidence.
 
-            definitions = await get_skill_definitions(result.missing_required, session=session)
+        Credit needs >= rag_min_indicators distinct knowledge-base indicators in
+        positive (non-negated, non-learning) candidate evidence, or one indicator
+        plus a CV chunk whose similarity to the skill definition reaches
+        rag_chunk_similarity_threshold. Explicitly negated skills never get credit.
+        """
+        if not settings.rag_enrichment_enabled:
+            return
+        try:
+            knowledge = await self._rag_knowledge_for(result.missing_required, session)
         except Exception:
-            logger.debug("RAG skill definitions unavailable for matching", exc_info=True)
+            logger.debug("RAG skill knowledge unavailable for matching", exc_info=True)
             return
 
+        evidence: _RagCandidateEvidence | None = None
+        threshold = settings.rag_chunk_similarity_threshold
+        min_indicators = max(1, settings.rag_min_indicators)
+        confidence = min(settings.rag_match_confidence, RAG_MAX_CONFIDENCE)
         still_missing: list[str] = []
         for skill in result.missing_required:
-            definition = definitions.get(normalize_skill_name(skill))
-            if not definition:
+            entry = knowledge.get(normalize_skill_name(skill))
+            if entry is None or not entry.indicators:
                 still_missing.append(skill)
                 continue
-            similarity = await self._rag_similarity_for_skill(definition, candidate)
-            if similarity > 0.75:
-                result.matched_required.append(SkillMatch(
-                    skill=skill,
-                    match_type="rag",
-                    confidence=0.60,
-                ))
-                result.rag_matched_count += 1
-                result.rag_enriched_skills.append(skill)
-                logger.info(
-                    "RAG weak skill match applied",
-                    extra={"candidate_id": candidate.id, "skill": skill, "similarity": round(similarity, 4)},
-                )
-            else:
+            if evidence is None:
+                evidence = self._rag_candidate_evidence(candidate)
+            found = self._find_rag_indicators(entry, evidence, candidate)
+            if not found:
                 still_missing.append(skill)
+                continue
+            indicators = [indicator for indicator, _ in found.values()]
+            if self._status_blocks_rag(skill, candidate):
+                result.rag_rejected[skill] = {
+                    "indicators": indicators,
+                    "reason": "skill explicitly negated or only being learned",
+                }
+                still_missing.append(skill)
+                continue
+
+            chunk_indices = list(dict.fromkeys(index for _, index in found.values() if index >= 0))
+            best_chunk, similarity = await self._rag_best_chunk(entry, evidence, chunk_indices)
+            rounded_similarity = round(similarity, 4) if similarity is not None else None
+            if len(found) >= min_indicators:
+                rule = f">= {min_indicators} distinct indicators"
+            elif similarity is not None and similarity >= threshold:
+                rule = f"1 indicator + chunk similarity >= {threshold:.2f}"
+            else:
+                semantic_note = (
+                    "no semantic evidence available"
+                    if similarity is None
+                    else f"best chunk similarity below {threshold:.2f}"
+                )
+                result.rag_rejected[skill] = {
+                    "indicators": indicators,
+                    "similarity": rounded_similarity,
+                    "reason": f"only {len(found)} indicator and {semantic_note}",
+                }
+                still_missing.append(skill)
+                continue
+
+            indicator_chunks = [evidence.chunks[index] for index in chunk_indices]
+            result.matched_required.append(SkillMatch(skill=skill, match_type="rag", confidence=confidence))
+            result.rag_matched_count += 1
+            result.rag_enriched_skills.append(skill)
+            result.rag_evidence[skill] = {
+                "indicators": indicators,
+                "best_chunk": _truncate_chunk(best_chunk or (indicator_chunks[0] if indicator_chunks else None)),
+                "similarity": rounded_similarity,
+                "indicator_chunks": [_truncate_chunk(chunk) for chunk in indicator_chunks[:3]],
+                "rule": rule,
+                "confidence": confidence,
+            }
+            logger.info(
+                "RAG partial skill credit applied",
+                extra={
+                    "candidate_id": candidate.id,
+                    "skill": skill,
+                    "indicators": indicators,
+                    "similarity": rounded_similarity,
+                },
+            )
         result.missing_required = still_missing
 
-    async def _rag_similarity_for_skill(self, definition: str, candidate: Candidate) -> float:
+    async def _rag_knowledge_for(self, skills: list[str], session: AsyncSession) -> dict[str, Any]:
         """
-        Scores whether candidate evidence semantically aligns with a RAG skill definition.
+        Fetches skill knowledge once per engine run instead of once per candidate.
         """
-        candidate_text = self._build_candidate_text(candidate)
-        if not is_embedding_quality_text(definition) or not is_embedding_quality_text(candidate_text):
-            return 0.0
-        if settings.embedding_provider.lower() != "hash":
+        from app.services.rag import get_skill_knowledge
+
+        wanted = [normalize_skill_name(skill) for skill in skills]
+        missing = [skill for skill in wanted if skill not in self._rag_knowledge_cache]
+        if missing:
+            fetched = await get_skill_knowledge(missing, session=session)
+            for skill in missing:
+                self._rag_knowledge_cache[skill] = fetched.get(skill)
+        return {skill: self._rag_knowledge_cache[skill] for skill in wanted if self._rag_knowledge_cache.get(skill)}
+
+    def _rag_candidate_evidence(self, candidate: Candidate) -> _RagCandidateEvidence:
+        """
+        Splits candidate evidence into sentence chunks, cached per candidate.
+        """
+        sources = [str(item or "") for item in list(candidate.experience or []) + list(candidate.projects or [])]
+        sources.append(str(candidate.raw_text or ""))
+        digest = hashlib.sha256("\x1f".join(sources).encode("utf-8")).hexdigest()
+        cache_key = f"{candidate.id}:{digest}"
+        cached = self._rag_evidence_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        chunks: list[str] = []
+        seen: set[str] = set()
+        for source in sources:
+            text = _RAG_WRAPPED_LINE.sub(" ", source)
+            for piece in _RAG_SENTENCE_BREAK.split(text):
+                for part in _split_long_chunk(piece.strip(" \t-*•·")):
+                    key = " ".join(part.lower().split())
+                    if sum(char.isalnum() for char in key) < 3 or key in seen:
+                        continue
+                    seen.add(key)
+                    chunks.append(" ".join(part.split()))
+            if len(chunks) >= settings.rag_max_chunks:
+                break
+        chunks = chunks[: settings.rag_max_chunks]
+        lowered = [chunk.lower() for chunk in chunks]
+        evidence = _RagCandidateEvidence(
+            chunks=chunks,
+            lowered=lowered,
+            joined="\n".join(lowered),
+            positive_skills={normalize_skill_name(skill) for skill in self._candidate_skill_names(candidate)},
+        )
+        if len(self._rag_evidence_cache) >= RAG_EVIDENCE_CACHE_SIZE:
+            self._rag_evidence_cache.pop(next(iter(self._rag_evidence_cache)))
+        self._rag_evidence_cache[cache_key] = evidence
+        return evidence
+
+    def _find_rag_indicators(
+        self,
+        entry: Any,
+        evidence: _RagCandidateEvidence,
+        candidate: Candidate,
+    ) -> dict[str, tuple[str, int]]:
+        """
+        Returns distinct indicators found in positive evidence, keyed by canonical
+        skill name, with the chunk index of their first occurrence (-1 = skills list).
+        """
+        blocked = {
+            normalize_skill_name(skill)
+            for skill in list(candidate.negative_skills or []) + list(candidate.learning_skills or [])
+        }
+        hits = [indicator for indicator in entry.indicators if build_term_pattern(indicator).search(evidence.joined)]
+        found: dict[str, tuple[str, int]] = {}
+        if hits:
+            not_sufficient = [build_term_pattern(term) for term in entry.not_sufficient]
+            for index, chunk in enumerate(evidence.lowered):
+                matches: list[tuple[int, int, str]] = []
+                masks: list[tuple[int, int]] | None = None
+                for indicator in hits:
+                    for match in build_term_pattern(indicator).finditer(chunk):
+                        if masks is None:
+                            masks = [m.span() for pattern in not_sufficient for m in pattern.finditer(chunk)]
+                        start, end = match.span()
+                        # A longer look-alike phrase ("payment tokenization") covers this occurrence.
+                        if any(s <= start and end <= e and e - s > end - start for s, e in masks):
+                            continue
+                        if _in_non_evidence_context(chunk, start, end):
+                            continue
+                        matches.append((start, end, indicator))
+                # Longest match wins so one mention is never counted as two indicators.
+                matches.sort(key=lambda item: (item[0] - item[1], item[0]))
+                taken: list[tuple[int, int]] = []
+                for start, end, indicator in matches:
+                    if any(start < t_end and t_start < end for t_start, t_end in taken):
+                        continue
+                    taken.append((start, end))
+                    canonical = normalize_skill_name(indicator)
+                    if canonical not in blocked:
+                        found.setdefault(canonical, (indicator, index))
+
+        for indicator in entry.indicators:
+            canonical = normalize_skill_name(indicator)
+            if canonical in found or canonical in blocked or canonical not in evidence.positive_skills:
+                continue
+            if not self._status_blocks_rag(canonical, candidate):
+                found[canonical] = (indicator, -1)
+        return found
+
+    async def _rag_best_chunk(
+        self,
+        entry: Any,
+        evidence: _RagCandidateEvidence,
+        chunk_indices: list[int],
+    ) -> tuple[str | None, float | None]:
+        """
+        Returns the indicator-bearing chunk most similar to the skill definition (max cosine).
+
+        Only chunks that contain a found indicator are scored: the max over every
+        chunk of a real CV (~100 lines) lands near 0.37 with MiniLM from generic
+        lines alone ("passionate about solving complex problems"), which would
+        turn "1 indicator + semantic" into "1 indicator".
+        """
+        if settings.embedding_provider.lower() == "hash" or not chunk_indices:
+            return None, None
+        if not evidence.embedding_attempted:
+            evidence.embedding_attempted = True
             try:
-                import numpy as np
-
-                definition_embedding, candidate_embedding = await self.embedder.embed([definition, candidate_text])
-                if len(definition_embedding) == len(candidate_embedding):
-                    left = np.array(definition_embedding, dtype=np.float32)
-                    right = np.array(candidate_embedding, dtype=np.float32)
-                    denom = float(np.linalg.norm(left) * np.linalg.norm(right))
-                    if denom:
-                        return float(np.dot(left, right) / denom)
+                evidence.embeddings = await self.embedder.embed(evidence.chunks)
             except Exception:
-                logger.debug("RAG embedding similarity failed; using lexical fallback", exc_info=True)
+                logger.debug("RAG chunk embedding failed; semantic evidence disabled", exc_info=True)
+        definition_vector = await self._rag_definition_vector(entry)
+        if not evidence.embeddings or definition_vector is None:
+            return None, None
 
-        definition_tokens = self._content_tokens(definition)
-        candidate_tokens = self._content_tokens(candidate_text)
-        if not definition_tokens or not candidate_tokens:
-            return 0.0
-        overlap = len(definition_tokens & candidate_tokens) / len(definition_tokens)
-        return min(1.0, overlap * 2.0)
+        import numpy as np
 
-    @staticmethod
-    def _content_tokens(text: str) -> set[str]:
-        stopwords = {
-            "and", "are", "for", "from", "into", "that", "the", "this", "with",
-            "skill", "skills", "using", "used", "use", "key", "known",
-        }
-        return {
-            token
-            for token in re.findall(r"[a-zA-Z][a-zA-Z0-9+#.-]{2,}", (text or "").lower())
-            if token not in stopwords
-        }
+        indices = [i for i in chunk_indices if len(evidence.embeddings[i]) == len(definition_vector)]
+        if not indices:
+            return None, None
+        matrix = np.asarray([evidence.embeddings[i] for i in indices], dtype=np.float32)
+        query = np.asarray(definition_vector, dtype=np.float32)
+        norms = np.linalg.norm(matrix, axis=1) * (np.linalg.norm(query) or 1.0)
+        norms[norms == 0] = 1.0
+        similarities = matrix @ query / norms
+        best = int(np.argmax(similarities))
+        return evidence.chunks[indices[best]], float(similarities[best])
+
+    async def _rag_definition_vector(self, entry: Any) -> list[float] | None:
+        """
+        Reuses the stored definition embedding when it came from the active model.
+        """
+        cached = self._rag_definition_cache.get(entry.skill)
+        if cached is not None:
+            return cached
+        vector: list[float] | None = None
+        if entry.embedding and entry.embedding_model == embedding_model_name_for_provider():
+            vector = list(entry.embedding)
+        else:
+            try:
+                vector = (await self.embedder.embed([entry.definition]))[0]
+            except Exception:
+                logger.debug("RAG definition embedding failed", exc_info=True)
+        if vector is not None:
+            self._rag_definition_cache[entry.skill] = vector
+        return vector
 
     def _candidate_skill_names(self, candidate: Candidate) -> list[str]:
         """
@@ -1246,6 +1512,13 @@ class HybridMatchingEngine:
         Checks whether the CV says the candidate does not have the skill (NONE).
         """
         return self._status_for(skill, candidate).status == skill_status.NONE
+
+    def _status_blocks_rag(self, skill: str, candidate: Candidate) -> bool:
+        """
+        RAG partial credit needs more than a mention: the CV must not say the
+        candidate lacks the skill (NONE) or is only learning it (LEARNING).
+        """
+        return self._status_for(skill, candidate).status in (skill_status.NONE, skill_status.LEARNING)
 
     def _record_status_rejection(
         self,
@@ -1443,6 +1716,8 @@ class HybridMatchingEngine:
             "optional_matched_count": len(skill_result.matched_optional),
             "rag_matched_count": skill_result.rag_matched_count,
             "rag_enriched_skills": skill_result.rag_enriched_skills,
+            "rag_evidence": skill_result.rag_evidence,
+            "rag_rejected": skill_result.rag_rejected,
             "required_confidence_sum": round(sum(match.confidence for match in skill_result.matched_required), 4),
             "optional_confidence_sum": round(sum(match.confidence for match in skill_result.matched_optional), 4),
             "required_score_type": "confidence_weighted_coverage",
@@ -1467,6 +1742,7 @@ class HybridMatchingEngine:
         reasoning.missing_skills = skill_result.missing_required.copy()
         reasoning.rag_matched_count = skill_result.rag_matched_count
         reasoning.rag_enriched_skills = skill_result.rag_enriched_skills.copy()
+        reasoning.rag_evidence = dict(skill_result.rag_evidence)
         
         # Strengths
         if skill_result.required_score >= 0.8:
@@ -1480,7 +1756,9 @@ class HybridMatchingEngine:
         if "relevant_certificate" in junior_evidence_signals:
             reasoning.strengths.append("Relevant certificate supports junior readiness")
         if skill_result.rag_matched_count:
-            reasoning.strengths.append("RAG knowledge base supplied weak skill evidence")
+            reasoning.strengths.append(
+                "Partial credit from related-skill evidence: " + ", ".join(skill_result.rag_enriched_skills)
+            )
         if seniority_score >= 0.8:
             reasoning.strengths.append("Experience level matches role")
         

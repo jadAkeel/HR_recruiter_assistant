@@ -102,6 +102,18 @@ async def _ensure_initial_owner() -> None:
             logger.info("Initial owner account is ready: %s", owner.email)
 
 
+def _start_knowledge_sync() -> asyncio.Task | None:
+    """
+    Syncs the RAG knowledge base in the background so embedding never delays startup.
+    """
+    if not settings.rag_auto_seed:
+        return None
+    from app.services.rag import seed_knowledge_base_on_startup
+
+    logger.info("RAG knowledge base sync started in background")
+    return asyncio.create_task(seed_knowledge_base_on_startup())
+
+
 # Background worker that processes CV uploads from the task queue
 async def _cv_worker():
     """
@@ -292,21 +304,18 @@ async def lifespan(_: FastAPI):
             raise RuntimeError("Redis is required for production CV task queueing")
         logger.info("Embedding provider: %s", settings.embedding_provider)
         await _warm_embedding_model()
+        knowledge_task = _start_knowledge_sync()
         worker_task = asyncio.create_task(_cv_worker()) if settings.run_cv_worker_in_api else None
         keep_alive_task = asyncio.create_task(_keep_alive_worker()) if _should_run_keep_alive() else None
         if worker_task is None:
             logger.info("In-process CV worker disabled; expecting external worker service")
         yield
-        if worker_task is not None:
-            worker_task.cancel()
+        for task in (worker_task, keep_alive_task, knowledge_task):
+            if task is None:
+                continue
+            task.cancel()
             try:
-                await worker_task
-            except asyncio.CancelledError:
-                pass
-        if keep_alive_task is not None:
-            keep_alive_task.cancel()
-            try:
-                await keep_alive_task
+                await task
             except asyncio.CancelledError:
                 pass
     finally:

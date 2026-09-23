@@ -24,6 +24,8 @@ async def test_rag_skill_definitions_and_matching_integration() -> None:
             content="GraphQL APIs use schema queries and resolvers for client-driven data access.",
             category="skill",
             tags=["graphql"],
+            # RAG credit now requires concrete indicators, not whole-CV similarity.
+            indicators=["schema queries", "resolver"],
         )
         job = Job(id=str(uuid.uuid4()), title="API Engineer", description="Needs GraphQL.", required_skills=["graphql"], optional_skills=[], seniority="mid")
         candidate = Candidate(
