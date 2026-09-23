@@ -13,6 +13,7 @@ An AI-powered recruitment automation platform that covers the entire hiring life
 - [Getting Started](#getting-started)
   - [Development (Docker)](#development-docker)
   - [Development (Manual)](#development-manual)
+  - [Local demo (one command)](#local-demo-one-command)
   - [Production](#production)
 - [Environment Variables](#environment-variables)
 - [API Endpoints](#api-endpoints)
@@ -190,6 +191,20 @@ npm run dev
 ```
 
 Open http://localhost:5173.
+
+### Local demo (one command)
+
+```powershell
+cd backend; python scripts/download_models.py   # once: pre-fetch embedding + whisper weights
+cd ..; powershell -ExecutionPolicy Bypass -File scriptsun_demo.ps1
+```
+
+`scripts/run_demo.ps1` checks Ollama (and starts `ollama serve` if needed), then warms up
+`llama3.2` and `gemma3:4b` (a first CPU load takes ~25s each). If Docker Desktop is running, it
+starts or reuses a `demo-redis` container. Then it starts the backend on `:8000` and the frontend
+(`npm run dev`) on `:5173`, and prints `/api/v1/ready`. Useful flags: `-SkipWarmup`, `-NoRedis`,
+`-NoOllama`, and `-NoWait` (leave the services running and print the stop command). It uses the
+database from `backend/.env`.
 
 ### Production
 
