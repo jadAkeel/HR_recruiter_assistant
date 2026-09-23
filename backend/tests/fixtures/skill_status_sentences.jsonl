@@ -1,0 +1,110 @@
+{"sentence": "Developed REST APIs using JavaScript and Node.js at Acme (2021-2024).", "skill": "javascript", "label": "HAS", "split": "seen", "origin": "prior"}
+{"sentence": "3 years of professional experience with JavaScript.", "skill": "javascript", "label": "HAS", "split": "seen", "origin": "prior"}
+{"sentence": "Expert in JavaScript and TypeScript.", "skill": "javascript", "label": "HAS", "split": "seen", "origin": "prior"}
+{"sentence": "Proficient in JavaScript.", "skill": "javascript", "label": "HAS", "split": "seen", "origin": "prior"}
+{"sentence": "Strong command of JavaScript.", "skill": "javascript", "label": "HAS", "split": "seen", "origin": "prior"}
+{"sentence": "Built a React dashboard in JavaScript for 10k users.", "skill": "javascript", "label": "HAS", "split": "seen", "origin": "prior"}
+{"sentence": "Skills: JavaScript, Python, SQL", "skill": "javascript", "label": "HAS", "split": "seen", "origin": "prior"}
+{"sentence": "Hands-on experience with JavaScript.", "skill": "javascript", "label": "HAS", "split": "seen", "origin": "prior"}
+{"sentence": "I know JavaScript well.", "skill": "javascript", "label": "HAS", "split": "seen", "origin": "prior"}
+{"sentence": "Worked extensively with JavaScript on front-end projects.", "skill": "javascript", "label": "HAS", "split": "seen", "origin": "prior"}
+{"sentence": "Basic knowledge of JavaScript.", "skill": "javascript", "label": "WEAK", "split": "seen", "origin": "prior"}
+{"sentence": "Familiar with JavaScript.", "skill": "javascript", "label": "WEAK", "split": "seen", "origin": "prior"}
+{"sentence": "Limited experience with JavaScript.", "skill": "javascript", "label": "WEAK", "split": "seen", "origin": "prior"}
+{"sentence": "I am not good at JavaScript.", "skill": "javascript", "label": "WEAK", "split": "seen", "origin": "prior"}
+{"sentence": "Some exposure to JavaScript during university.", "skill": "javascript", "label": "WEAK", "split": "seen", "origin": "prior"}
+{"sentence": "Beginner-level JavaScript.", "skill": "javascript", "label": "WEAK", "split": "seen", "origin": "prior"}
+{"sentence": "Elementary understanding of JavaScript.", "skill": "javascript", "label": "WEAK", "split": "seen", "origin": "prior"}
+{"sentence": "I am learning JavaScript.", "skill": "javascript", "label": "LEARNING", "split": "seen", "origin": "prior"}
+{"sentence": "Currently learning JavaScript.", "skill": "javascript", "label": "LEARNING", "split": "seen", "origin": "prior"}
+{"sentence": "Studying JavaScript through an online course.", "skill": "javascript", "label": "LEARNING", "split": "seen", "origin": "prior"}
+{"sentence": "Taking a JavaScript course on Udemy.", "skill": "javascript", "label": "LEARNING", "split": "seen", "origin": "prior"}
+{"sentence": "Planning to learn JavaScript next year.", "skill": "javascript", "label": "LEARNING", "split": "seen", "origin": "prior"}
+{"sentence": "I'm teaching myself JavaScript.", "skill": "javascript", "label": "LEARNING", "split": "seen", "origin": "prior"}
+{"sentence": "Improving my JavaScript skills through self-study.", "skill": "javascript", "label": "LEARNING", "split": "seen", "origin": "prior"}
+{"sentence": "I have no experience with JavaScript.", "skill": "javascript", "label": "NONE", "split": "seen", "origin": "prior"}
+{"sentence": "I don't know JavaScript.", "skill": "javascript", "label": "NONE", "split": "seen", "origin": "prior"}
+{"sentence": "Never used JavaScript.", "skill": "javascript", "label": "NONE", "split": "seen", "origin": "prior"}
+{"sentence": "I have not worked with JavaScript.", "skill": "javascript", "label": "NONE", "split": "seen", "origin": "prior"}
+{"sentence": "No prior JavaScript experience.", "skill": "javascript", "label": "NONE", "split": "seen", "origin": "prior"}
+{"sentence": "Python developer; I have never touched JavaScript.", "skill": "javascript", "label": "NONE", "split": "seen", "origin": "prior"}
+{"sentence": "Not familiar with JavaScript.", "skill": "javascript", "label": "NONE", "split": "seen", "origin": "prior"}
+{"sentence": "I know Python but not JavaScript.", "skill": "javascript", "label": "NONE", "split": "seen", "origin": "prior"}
+{"sentence": "Shipped three production features in JavaScript.", "skill": "javascript", "label": "HAS", "split": "heldout", "origin": "prior"}
+{"sentence": "JavaScript (advanced), Python (intermediate).", "skill": "javascript", "label": "HAS", "split": "heldout", "origin": "prior"}
+{"sentence": "Led migration of a legacy JavaScript codebase.", "skill": "javascript", "label": "HAS", "split": "heldout", "origin": "prior"}
+{"sentence": "Wrote unit tests in JavaScript with Jest.", "skill": "javascript", "label": "HAS", "split": "heldout", "origin": "prior"}
+{"sentence": "Working knowledge of JavaScript.", "skill": "javascript", "label": "WEAK", "split": "heldout", "origin": "prior"}
+{"sentence": "Rudimentary JavaScript.", "skill": "javascript", "label": "WEAK", "split": "heldout", "origin": "prior"}
+{"sentence": "I can read JavaScript but rarely write it.", "skill": "javascript", "label": "WEAK", "split": "heldout", "origin": "prior"}
+{"sentence": "JavaScript (beginner).", "skill": "javascript", "label": "WEAK", "split": "heldout", "origin": "prior"}
+{"sentence": "Enrolled in a JavaScript bootcamp.", "skill": "javascript", "label": "LEARNING", "split": "heldout", "origin": "prior"}
+{"sentence": "Getting started with JavaScript.", "skill": "javascript", "label": "LEARNING", "split": "heldout", "origin": "prior"}
+{"sentence": "Currently picking up JavaScript.", "skill": "javascript", "label": "LEARNING", "split": "heldout", "origin": "prior"}
+{"sentence": "Aiming to master JavaScript by 2027.", "skill": "javascript", "label": "LEARNING", "split": "heldout", "origin": "prior"}
+{"sentence": "JavaScript: none.", "skill": "javascript", "label": "NONE", "split": "heldout", "origin": "prior"}
+{"sentence": "Have yet to use JavaScript.", "skill": "javascript", "label": "NONE", "split": "heldout", "origin": "prior"}
+{"sentence": "Lacking JavaScript experience.", "skill": "javascript", "label": "NONE", "split": "heldout", "origin": "prior"}
+{"sentence": "Unfamiliar with JavaScript.", "skill": "javascript", "label": "NONE", "split": "heldout", "origin": "prior"}
+{"sentence": "Designed and maintained Docker images for 12 microservices in production.", "skill": "docker", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Reduced API latency by 40% by rewriting the caching layer in Python.", "skill": "python", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Technologies: React, TypeScript, PostgreSQL", "skill": "react", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Five years building data pipelines with SQL and Airflow.", "skill": "sql", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Mentored two junior engineers on Kubernetes deployments.", "skill": "kubernetes", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "AWS Certified Solutions Architect with hands-on EC2 and S3 work.", "skill": "aws", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Contributed bug fixes to an open-source Django project.", "skill": "django", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Java (5 years), Spring Boot (3 years)", "skill": "java", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Owned the CI pipeline and Git branching strategy for a team of 8.", "skill": "git", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Deep expertise in PostgreSQL query tuning.", "skill": "postgresql", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Refactored the checkout flow in JavaScript, cutting bundle size by 30%.", "skill": "javascript", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Some familiarity with Kubernetes from a hackathon.", "skill": "kubernetes", "label": "WEAK", "split": "heldout", "origin": "new"}
+{"sentence": "Novice in Docker.", "skill": "docker", "label": "WEAK", "split": "heldout", "origin": "new"}
+{"sentence": "Exposure to AWS through a single university lab.", "skill": "aws", "label": "WEAK", "split": "heldout", "origin": "new"}
+{"sentence": "Can write simple SQL queries with guidance.", "skill": "sql", "label": "WEAK", "split": "heldout", "origin": "new"}
+{"sentence": "Moderate Java skills, mostly from coursework.", "skill": "java", "label": "WEAK", "split": "heldout", "origin": "new"}
+{"sentence": "TypeScript: basic", "skill": "typescript", "label": "WEAK", "split": "heldout", "origin": "new"}
+{"sentence": "Only a surface-level understanding of Django.", "skill": "django", "label": "WEAK", "split": "heldout", "origin": "new"}
+{"sentence": "Used Git a couple of times for class assignments.", "skill": "git", "label": "WEAK", "split": "heldout", "origin": "new"}
+{"sentence": "Python (entry level)", "skill": "python", "label": "WEAK", "split": "heldout", "origin": "new"}
+{"sentence": "I have a little experience with React.", "skill": "react", "label": "WEAK", "split": "heldout", "origin": "new"}
+{"sentence": "Took an introductory JavaScript module in my first year.", "skill": "javascript", "label": "WEAK", "split": "heldout", "origin": "new"}
+{"sentence": "Pursuing the AWS Cloud Practitioner certification.", "skill": "aws", "label": "LEARNING", "split": "heldout", "origin": "new"}
+{"sentence": "Now learning Go in my spare time.", "skill": "go", "label": "LEARNING", "split": "heldout", "origin": "new"}
+{"sentence": "Working through the official Kubernetes tutorials.", "skill": "kubernetes", "label": "LEARNING", "split": "heldout", "origin": "new"}
+{"sentence": "Recently started learning Docker.", "skill": "docker", "label": "LEARNING", "split": "heldout", "origin": "new"}
+{"sentence": "Plan to pick up TypeScript this quarter.", "skill": "typescript", "label": "LEARNING", "split": "heldout", "origin": "new"}
+{"sentence": "Attending an evening class on SQL.", "skill": "sql", "label": "LEARNING", "split": "heldout", "origin": "new"}
+{"sentence": "Self-teaching React with side projects in progress.", "skill": "react", "label": "LEARNING", "split": "heldout", "origin": "new"}
+{"sentence": "My goal is to become proficient in Java.", "skill": "java", "label": "LEARNING", "split": "heldout", "origin": "new"}
+{"sentence": "Learning Django by following online tutorials.", "skill": "django", "label": "LEARNING", "split": "heldout", "origin": "new"}
+{"sentence": "JavaScript is on my learning roadmap for 2026.", "skill": "javascript", "label": "LEARNING", "split": "heldout", "origin": "new"}
+{"sentence": "No hands-on Docker experience yet.", "skill": "docker", "label": "NONE", "split": "heldout", "origin": "new"}
+{"sentence": "Zero exposure to Kubernetes.", "skill": "kubernetes", "label": "NONE", "split": "heldout", "origin": "new"}
+{"sentence": "I've never written Java professionally or otherwise.", "skill": "java", "label": "NONE", "split": "heldout", "origin": "new"}
+{"sentence": "AWS: not used", "skill": "aws", "label": "NONE", "split": "heldout", "origin": "new"}
+{"sentence": "I do not have any SQL experience.", "skill": "sql", "label": "NONE", "split": "heldout", "origin": "new"}
+{"sentence": "Haven't had the chance to use TypeScript.", "skill": "typescript", "label": "NONE", "split": "heldout", "origin": "new"}
+{"sentence": "React is not part of my skill set.", "skill": "react", "label": "NONE", "split": "heldout", "origin": "new"}
+{"sentence": "Go: no knowledge.", "skill": "go", "label": "NONE", "split": "heldout", "origin": "new"}
+{"sentence": "I lack experience in Django.", "skill": "django", "label": "NONE", "split": "heldout", "origin": "new"}
+{"sentence": "I have not yet had any exposure to JavaScript.", "skill": "javascript", "label": "NONE", "split": "heldout", "origin": "new"}
+{"sentence": "I don’t know Terraform.", "skill": "terraform", "label": "NONE", "split": "heldout", "origin": "new"}
+{"sentence": "Havent used MongoDB.", "skill": "mongodb", "label": "NONE", "split": "heldout", "origin": "new"}
+{"sentence": "Built a Node.js backend with MongoDB; I am still learning Kubernetes.", "skill": "node.js", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Built a Node.js backend with MongoDB; I am still learning Kubernetes.", "skill": "mongodb", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Built a Node.js backend with MongoDB; I am still learning Kubernetes.", "skill": "kubernetes", "label": "LEARNING", "split": "heldout", "origin": "new"}
+{"sentence": "Comfortable with Python; only basic familiarity with Go.", "skill": "python", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Comfortable with Python; only basic familiarity with Go.", "skill": "go", "label": "WEAK", "split": "heldout", "origin": "new"}
+{"sentence": "Strong in React but have never worked with Angular.", "skill": "react", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Strong in React but have never worked with Angular.", "skill": "angular", "label": "NONE", "split": "heldout", "origin": "new"}
+{"sentence": "Experienced with Java and Spring Boot; no exposure to Kotlin.", "skill": "java", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Experienced with Java and Spring Boot; no exposure to Kotlin.", "skill": "kotlin", "label": "NONE", "split": "heldout", "origin": "new"}
+{"sentence": "Proficient in SQL, beginner in Python.", "skill": "sql", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Proficient in SQL, beginner in Python.", "skill": "python", "label": "WEAK", "split": "heldout", "origin": "new"}
+{"sentence": "Currently studying Rust, while using C++ daily at work.", "skill": "rust", "label": "LEARNING", "split": "heldout", "origin": "new"}
+{"sentence": "Currently studying Rust, while using C++ daily at work.", "skill": "c++", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Familiar with Docker basics but I've never used Kubernetes.", "skill": "docker", "label": "WEAK", "split": "heldout", "origin": "new"}
+{"sentence": "Familiar with Docker basics but I've never used Kubernetes.", "skill": "kubernetes", "label": "NONE", "split": "heldout", "origin": "new"}
+{"sentence": "Skilled in Git, learning GitHub Actions.", "skill": "git", "label": "HAS", "split": "heldout", "origin": "new"}
+{"sentence": "Skilled in Git, learning GitHub Actions.", "skill": "github actions", "label": "LEARNING", "split": "heldout", "origin": "new"}
+{"sentence": "I know Python but not JavaScript.", "skill": "python", "label": "HAS", "split": "heldout", "origin": "new"}
