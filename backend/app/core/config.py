@@ -85,6 +85,13 @@ class Settings(BaseSettings):
     voice_request_timeout_seconds: float = 20.0
     security_headers_enabled: bool = True
 
+    # Skill status (HAS/WEAK/LEARNING/NONE): rules at upload, then a background
+    # LLM pass over the sentences no rule resolved.
+    skill_status_llm_enabled: bool = True
+    skill_status_llm_timeout_seconds: float = 60.0
+    skill_status_llm_batch_size: int = 20
+    skill_status_llm_max_items: int = 40
+
     # Model names for different Ollama tasks
     ollama_model: str = "llama3.2"
     ollama_interview_model: str = "gemma3:4b"
