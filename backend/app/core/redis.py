@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 from app.core.config import settings
@@ -9,22 +10,29 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 _redis = None
+# After a failed connect, skip retries briefly: a refused connection can take ~2s on
+# Windows, and every caller would otherwise pay it.
+_UNAVAILABLE_RETRY_SECONDS = 5.0
+_unavailable_until = 0.0
 
 
 async def get_redis():
     """
     Returns a Redis client when Redis is available.
     """
-    global _redis
-    if _redis is None:
+    global _redis, _unavailable_until
+    if _redis is None and time.monotonic() >= _unavailable_until:
         try:
             import redis.asyncio as aioredis
-            _redis = aioredis.from_url(str(settings.redis_url), decode_responses=True)
-            await _redis.ping()
+            client = aioredis.from_url(str(settings.redis_url), decode_responses=True)
+            await client.ping()
+            # Publish only a verified client; concurrent callers must not get one
+            # whose ping is still pending (or about to fail).
+            _redis = client
             logger.info("Connected to Redis")
         except Exception:
             logger.warning("Redis not available, caching disabled")
-            _redis = None
+            _unavailable_until = time.monotonic() + _UNAVAILABLE_RETRY_SECONDS
     return _redis
 
 

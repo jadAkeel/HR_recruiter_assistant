@@ -271,6 +271,39 @@ async def test_stale_saved_match_is_rescored_on_read() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_redis_never_hands_out_an_unverified_client(monkeypatch) -> None:
+    """
+    Regression: the client used to be published before its ping finished, so a
+    concurrent caller could get a client for a Redis that was down.
+    """
+    import redis.asyncio as aioredis
+
+    from app.core import redis as redis_module
+
+    created = []
+
+    class DownClient:
+        async def ping(self):
+            await asyncio.sleep(0.05)
+            raise ConnectionError("refused")
+
+    def from_url(*args, **kwargs):
+        created.append(1)
+        return DownClient()
+
+    monkeypatch.setattr(aioredis, "from_url", from_url)
+    monkeypatch.setattr(redis_module, "_redis", None)
+    monkeypatch.setattr(redis_module, "_unavailable_until", 0.0)
+
+    results = await asyncio.gather(redis_module.get_redis(), redis_module.get_redis())
+    assert results == [None, None]
+    assert redis_module._redis is None
+    attempts = len(created)
+    assert await redis_module.get_redis() is None
+    assert len(created) == attempts  # still inside the retry window: no new connect attempt
+
+
+@pytest.mark.asyncio
 async def test_refinement_enqueue_falls_back_to_memory_when_redis_push_fails(monkeypatch) -> None:
     """
     Checks that a refinement task is not lost when Redis fails mid-push (development).
