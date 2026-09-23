@@ -310,6 +310,46 @@ async def lifespan(_: FastAPI):
         shutdown_logging()
 
 
+# Tunnel domains are shared by every ngrok/localhost.run user, so trusting them with
+# credentialed CORS lets any tunnel owner call the API as a logged-in user. They are
+# opt-in (CORS_ALLOW_TUNNELS=true) and never honored in production.
+TUNNEL_HOST_PATTERNS = ["*.ngrok-free.app", "*.ngrok-free.dev", "*.ngrok.io", "*.ngrok.app", "*.lhr.life"]
+TUNNEL_ORIGIN_REGEX = r"https://([a-z0-9-]+\.)+(ngrok-free\.app|ngrok-free\.dev|ngrok\.io|ngrok\.app|lhr\.life)"
+LOCAL_ORIGIN_REGEX = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
+
+
+def _tunnels_allowed() -> bool:
+    """
+    Checks whether tunnel domains are opted in for this non-production run.
+    """
+    if settings.cors_allow_tunnels and settings.is_production:
+        logger.warning("CORS_ALLOW_TUNNELS is ignored in production; list tunnel origins explicitly")
+        return False
+    return settings.cors_allow_tunnels
+
+
+def _trusted_hosts() -> list[str]:
+    """
+    Returns configured hosts plus loopback, and tunnel wildcards only when opted in.
+    """
+    hosts = settings.trusted_hosts + ["localhost", "127.0.0.1"]
+    if _tunnels_allowed():
+        hosts += TUNNEL_HOST_PATTERNS
+    return list(dict.fromkeys(hosts))
+
+
+def _cors_origin_regex() -> str | None:
+    """
+    Returns the extra CORS origin pattern: any localhost port in development, plus
+    tunnel domains only when opted in. Production relies on CORS_ORIGINS_STR alone.
+    """
+    if settings.is_production:
+        return None
+    if _tunnels_allowed():
+        return f"({LOCAL_ORIGIN_REGEX})|({TUNNEL_ORIGIN_REGEX})"
+    return LOCAL_ORIGIN_REGEX
+
+
 def create_app() -> FastAPI:
     """
     Creates and configures the FastAPI application.
@@ -317,32 +357,17 @@ def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(GZipMiddleware, minimum_size=1024)
-    trusted = settings.trusted_hosts + [
-        "*.ngrok-free.app",
-        "*.ngrok-free.dev",
-        "*.ngrok.io",
-        "*.onrender.com",
-        "onrender.com",
-        "localhost",
-        "127.0.0.1",
-    ]
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=_trusted_hosts())
     if settings.rate_limit_enabled:
         app.add_middleware(
             RateLimitMiddleware,
             requests=settings.rate_limit_requests,
             window_seconds=settings.rate_limit_window_seconds,
         )
-    cors_origin_regex = None
-    if not settings.is_production:
-        cors_origin_regex = (
-            r"https?://(.*\.ngrok-free\.(app|dev)|.*\.ngrok\.io|"
-            r".*\.onrender\.com|lhr\.life|localhost:\d+)"
-        )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_origin_regex=cors_origin_regex,
+        allow_origin_regex=_cors_origin_regex(),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

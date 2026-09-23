@@ -71,6 +71,8 @@ class Settings(BaseSettings):
     # CORS and security
     cors_origins_str: str = "http://localhost:5173,http://localhost:5174,http://localhost:3000"
     trusted_hosts_str: str = "localhost,127.0.0.1,testserver"
+    # Accept any ngrok / localhost.run origin and host outside production (opt-in).
+    cors_allow_tunnels: bool = False
     rate_limit_enabled: bool = True
     rate_limit_requests: int = 1200
     rate_limit_window_seconds: int = 60

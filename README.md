@@ -222,7 +222,9 @@ Ollama models are pulled automatically on startup: `llama3.2`, `gemma3:4b`, `nom
 | `JWT_SECRET_KEY` | `dev-only-...` | JWT signing secret (min 32 chars) |
 | `ENVIRONMENT` | `development` | `development` or `production` |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string |
-| `CORS_ORIGINS_STR` | `http://localhost:5173,...` | Allowed CORS origins |
+| `CORS_ORIGINS_STR` | `http://localhost:5173,...` | Allowed CORS origins (exact origins; the only source of allowed origins in production) |
+| `TRUSTED_HOSTS_STR` | `localhost,127.0.0.1,testserver` | Allowed `Host` headers; `RENDER_EXTERNAL_HOSTNAME` is appended automatically |
+| `CORS_ALLOW_TUNNELS` | `false` | Outside production, also accept any `*.ngrok-free.app/.dev`, `*.ngrok.io/.app`, `*.lhr.life` origin and host. Off by default: tunnel domains are shared, and CORS runs with credentials. `scripts/start-ngrok-tunnel.ps1` writes your exact tunnel URL to `.env`, so it does not need this |
 | `ESCO_API_ENABLED` | `false` | Enable ESCO taxonomy enrichment |
 | `APP_BASE_URL` | `http://localhost:5173` | App base URL (emails, links) |
 | `MAX_UPLOAD_BYTES` | `15728640` | Max upload size (15MB) |
