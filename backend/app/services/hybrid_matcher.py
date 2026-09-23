@@ -37,6 +37,7 @@ from app.services.skill_catalog import (
     is_job_skill_name,
     normalize_skill_name,
 )
+from app.services import skill_status
 from app.services.project_semantic import (
     compute_junior_evidence_year_credit,
     compute_junior_project_semantic_bonus,
@@ -304,20 +305,6 @@ SENIORITY_YEARS = {
     "staff": (10, 20),
 }
 
-HARD_NEGATION_SKILL_CONTEXT = re.compile(
-    r"(?:don't\s+know|do\s+not\s+know|no\s+experience|not\s+experienced|never\s+used|"
-    r"haven't\s+used|not\s+familiar|don't\s+have|do\s+not\s+have|no\s+knowledge)",
-    re.IGNORECASE,
-)
-
-NON_EVIDENCE_SKILL_CONTEXT = re.compile(
-    r"(?:don't\s+know|do\s+not\s+know|no\s+experience|not\s+experienced|never\s+used|"
-    r"haven't\s+used|not\s+familiar|don't\s+have|do\s+not\s+have|no\s+knowledge|"
-    r"currently\s+learning|want(?:ing)?\s+to\s+learn|wish(?:ing)?\s+to\s+learn|"
-    r"trying\s+to\s+learn|studying)",
-    re.IGNORECASE,
-)
-
 BROAD_SKILL_TERMS = {
     "api",
     "automation",
@@ -356,6 +343,26 @@ class SkillMatch:
     confidence: float = 1.0
     years: float | None = None
     level: str | None = None
+    # From app.services.skill_status: HAS / WEAK / LEARNING, who decided it
+    # (rule / llm / default / legacy), and the CV sentence it was based on.
+    status: str = skill_status.HAS
+    status_source: str | None = None
+    evidence: str | None = None
+    confidence_cap: float = 1.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """
+        Serializes the match with its status evidence for reasoning payloads.
+        """
+        return {
+            "skill": self.skill,
+            "match_type": self.match_type,
+            "confidence": self.confidence,
+            "status": self.status,
+            "status_source": self.status_source,
+            "evidence": self.evidence,
+            "confidence_cap": self.confidence_cap,
+        }
 
 
 @dataclass
@@ -370,21 +377,18 @@ class SkillMatchResult:
     esco_coverage: float = 0.0  # % of skills found in ESCO
     rag_matched_count: int = 0
     rag_enriched_skills: list[str] = field(default_factory=list)
-    
+    # Skills the CV says the candidate does not have (status NONE), with evidence.
+    rejected_by_status: list[dict[str, Any]] = field(default_factory=list)
+
     def to_dict(self) -> dict[str, Any]:
         """
         Serializes this object into a plain dictionary.
         """
         return {
-            "matched_required": [
-                {"skill": m.skill, "match_type": m.match_type, "confidence": m.confidence}
-                for m in self.matched_required
-            ],
-            "matched_optional": [
-                {"skill": m.skill, "match_type": m.match_type, "confidence": m.confidence}
-                for m in self.matched_optional
-            ],
+            "matched_required": [m.to_dict() for m in self.matched_required],
+            "matched_optional": [m.to_dict() for m in self.matched_optional],
             "missing_required": self.missing_required,
+            "rejected_by_status": self.rejected_by_status,
             "skill_score": round(self.skill_score, 4),
             "required_score": round(self.required_score, 4),
             "optional_score": round(self.optional_score, 4),
@@ -879,6 +883,7 @@ class HybridMatchingEngine:
             else:
                 result.missing_required.append(req_skill)
                 missing_count += 1
+                self._record_status_rejection(result, req_skill, candidate, required=True)
         
         # Match optional skills
         for opt_skill in optional_skills:
@@ -887,16 +892,18 @@ class HybridMatchingEngine:
                 result.matched_optional.append(match)
                 if match.normalized:
                     esco_matches += 1
+            else:
+                self._record_status_rejection(result, opt_skill, candidate, required=False)
 
         # Fallback: check evidence text for required skills not found in structured fields
         if result.missing_required:
             evidence_text = self._evidence_text(candidate)
             still_missing: list[str] = []
             for skill in result.missing_required:
-                if self._text_has_positive_skill(skill, evidence_text):
-                    result.matched_required.append(SkillMatch(
-                        skill=skill, match_type="text", confidence=0.80,
-                    ))
+                if not self._status_rejects(skill, candidate) and self._text_mentions_skill(skill, evidence_text):
+                    result.matched_required.append(
+                        self._status_skill_match(skill, candidate, match_type="text", base_confidence=0.80)
+                    )
                     matched_count += 1
                 else:
                     still_missing.append(skill)
@@ -1051,18 +1058,14 @@ class HybridMatchingEngine:
         """
         skills = [
             skill for skill in list(candidate.skills or [])
-            if not self._candidate_skill_is_negated(skill, candidate, allow_learning=True)
+            if not self._status_rejects(skill, candidate)
         ]
         for detail in candidate.skills_detailed or []:
             if not isinstance(detail, dict):
                 continue
             status = str(detail.get("status", "")).lower().strip()
             name = str(detail.get("name", "")).strip()
-            if (
-                name
-                and status != "no_experience"
-                and not self._candidate_skill_is_negated(name, candidate, allow_learning=True)
-            ):
+            if name and status != "no_experience" and not self._status_rejects(name, candidate):
                 skills.append(name)
         return self._dedupe_skills(skills)
 
@@ -1090,8 +1093,8 @@ class HybridMatchingEngine:
     ) -> SkillMatch | None:
         """Match a single required skill against candidate skills."""
         req_lower = normalize_skill_name(required_skill)
-        if self._candidate_skill_is_negated(req_lower, candidate, allow_learning=True):
-            logger.debug("Required skill '%s' is explicitly negated by candidate evidence", required_skill)
+        if self._status_rejects(req_lower, candidate):
+            logger.debug("Required skill '%s' has status NONE in the candidate CV", required_skill)
             return None
         
         # Direct match - normalize both sides for comparison
@@ -1104,12 +1107,12 @@ class HybridMatchingEngine:
         
         if req_lower in candidate_skills_lower:
             logger.debug(f"âœ“ Direct match found for '{required_skill}'")
-            confidence = self._evidence_adjusted_confidence(required_skill, candidate, 1.0)
-            return SkillMatch(
-                skill=required_skill,
-                normalized=candidate_normalized.get(req_lower),
+            return self._status_skill_match(
+                required_skill,
+                candidate,
                 match_type="exact",
-                confidence=confidence,
+                base_confidence=1.0,
+                normalized=candidate_normalized.get(req_lower),
             )
 
         # Curated synonym matching. Keep this narrow: broad category matches
@@ -1122,12 +1125,13 @@ class HybridMatchingEngine:
             cand_synonyms = SYNONYM_MAP.get(cand_lower, set())
             if cand_lower in req_synonyms or req_lower in cand_synonyms:
                 logger.debug(f"âœ“ Synonym match found for '{required_skill}' via '{cand_skill}'")
-                confidence = self._evidence_adjusted_confidence(required_skill, candidate, 0.85)
-                return SkillMatch(
-                    skill=required_skill,
-                    normalized=candidate_normalized.get(cand_lower),
+                return self._status_skill_match(
+                    required_skill,
+                    candidate,
                     match_type="related" if self._is_broad_skill_term(req_lower) else "synonym",
-                    confidence=confidence,
+                    base_confidence=0.85,
+                    normalized=candidate_normalized.get(cand_lower),
+                    matched_skill=cand_lower,
                 )
         
         # ESCO-based matching
@@ -1138,12 +1142,13 @@ class HybridMatchingEngine:
                 # Same ESCO URI
                 if cand_norm and cand_norm.esco_uri == req_norm.esco_uri:
                     logger.debug(f"âœ“ ESCO match found for '{required_skill}' via '{cand_skill}'")
-                    confidence = self._evidence_adjusted_confidence(required_skill, candidate, 0.95)
-                    return SkillMatch(
-                        skill=required_skill,
-                        normalized=cand_norm,
+                    return self._status_skill_match(
+                        required_skill,
+                        candidate,
                         match_type="synonym",
-                        confidence=confidence,
+                        base_confidence=0.95,
+                        normalized=cand_norm,
+                        matched_skill=cand_skill,
                     )
             
             # Check related skills
@@ -1152,23 +1157,26 @@ class HybridMatchingEngine:
                 for cand_skill, cand_norm in candidate_normalized.items():
                     if cand_norm and cand_norm.esco_uri == rel.skill.esco_uri:
                         logger.debug(f"âœ“ ESCO related match for '{required_skill}' via '{cand_skill}'")
-                        confidence = self._evidence_adjusted_confidence(required_skill, candidate, rel.similarity_score)
-                        return SkillMatch(
-                            skill=required_skill,
-                            normalized=cand_norm,
+                        return self._status_skill_match(
+                            required_skill,
+                            candidate,
                             match_type="related",
-                            confidence=confidence,
+                            base_confidence=rel.similarity_score,
+                            normalized=cand_norm,
+                            matched_skill=cand_skill,
                         )
 
         # Additional detected skills are grounded but outside the catalog, so keep
         # them as weak evidence rather than treating them as exact catalog matches.
         uncatalogued = {normalize_skill_name(skill) for skill in (candidate.uncatalogued_skills or [])}
         if req_lower in uncatalogued:
-            return SkillMatch(
-                skill=required_skill,
-                normalized=req_norm,
+            return self._status_skill_match(
+                required_skill,
+                candidate,
                 match_type="uncatalogued",
-                confidence=0.40,
+                base_confidence=0.40,
+                normalized=req_norm,
+                evidence_cap=False,
             )
         
         # Final fallback: match token-safe mentions in the raw CV text, including
@@ -1178,13 +1186,17 @@ class HybridMatchingEngine:
             raw_lower = raw_skill.lower().strip()
             if self._is_broad_to_specific_match(req_lower, raw_lower):
                 continue
+            if self._status_rejects(raw_lower, candidate):
+                continue
             if self._raw_text_has_non_stuffed_skill(raw_lower, candidate):
-                confidence = 0.80 if raw_lower == req_lower else 0.75
-                return SkillMatch(
-                    skill=required_skill,
-                    normalized=req_norm,
+                return self._status_skill_match(
+                    required_skill,
+                    candidate,
                     match_type="text",
-                    confidence=confidence,
+                    base_confidence=0.80 if raw_lower == req_lower else 0.75,
+                    normalized=req_norm,
+                    matched_skill=raw_lower,
+                    evidence_cap=False,
                 )
 
         if (candidate.id, req_lower) in self._historical_feedback:
@@ -1202,130 +1214,136 @@ class HybridMatchingEngine:
         logger.debug(f"âœ— No match found for '{required_skill}'")
         return None
 
-    def _evidence_adjusted_confidence(self, skill: str, candidate: Candidate, base_confidence: float) -> float:
+    def _skill_statuses(self, candidate: Candidate) -> dict[str, skill_status.SkillStatusResult]:
         """
-        Lowers match confidence when a skill lacks supporting candidate evidence.
+        Loads the stored skill statuses of a candidate once per matching run.
         """
-        is_learning = False
-        skill_lower = normalize_skill_name(skill)
-        for detail in candidate.skills_detailed or []:
-            if not isinstance(detail, dict):
-                continue
-            name = normalize_skill_name(str(detail.get("name", "")))
-            status = str(detail.get("status", "")).lower().strip()
-            if name == skill_lower and status == "learning":
-                is_learning = True
-                break
-        if not is_learning:
-            learning_skills = {normalize_skill_name(s) for s in (candidate.learning_skills or [])}
-            if skill_lower in learning_skills:
-                is_learning = True
+        cache = self.__dict__.setdefault("_status_cache", {})
+        key = id(candidate)
+        if key not in cache:
+            # Keep the candidate referenced so its id() cannot be reused mid-run.
+            cache[key] = [candidate, skill_status.candidate_skill_statuses(candidate), None]
+        return cache[key][1]
 
-        if is_learning:
-            return min(base_confidence, 0.60)
-
-        if self._candidate_has_skill_evidence(skill, candidate):
-            return base_confidence
-        return min(base_confidence, 0.80)
-
-    def _candidate_skill_is_negated(self, skill: str, candidate: Candidate, allow_learning: bool = False) -> bool:
+    def _status_for(self, skill: str, candidate: Candidate) -> skill_status.SkillStatusResult:
         """
-        Checks whether the candidate explicitly denies or is only learning a skill.
+        Returns the stored status for a skill. A skill with no stored status (legacy rows,
+        raw-text fallbacks) is assessed from the CV sentences by the shared module.
         """
-        skill_lower = normalize_skill_name(skill)
-        neg_list = list(candidate.negative_skills or [])
-        if not allow_learning:
-            neg_list += list(candidate.learning_skills or [])
-        negative_skills = {
-            normalize_skill_name(item)
-            for item in neg_list
-        }
-        if skill_lower in negative_skills:
-            return True
+        normalized = normalize_skill_name(skill)
+        statuses = self._skill_statuses(candidate)
+        if normalized not in statuses:
+            entry = self.__dict__["_status_cache"][id(candidate)]
+            if entry[2] is None:
+                entry[2] = skill_status.split_cv_sentences(candidate.raw_text or "")
+            statuses[normalized] = skill_status.aggregate(
+                normalized, skill_status.assess_sentences(normalized, entry[2])
+            )
+        return statuses[normalized]
 
-        for detail in candidate.skills_detailed or []:
-            if not isinstance(detail, dict):
-                continue
-            name = normalize_skill_name(str(detail.get("name", "")))
-            status = str(detail.get("status", "")).lower().strip()
-            context = str(detail.get("context", "") or "")
-            neg_statuses = {"no_experience"}
-            if not allow_learning:
-                neg_statuses.add("learning")
-            if name == skill_lower and status in neg_statuses:
-                return True
-            if name == skill_lower and self._text_has_negative_skill(
-                skill_lower,
-                context,
-                include_learning=not allow_learning,
-            ):
-                return True
+    def _status_rejects(self, skill: str, candidate: Candidate) -> bool:
+        """
+        Checks whether the CV says the candidate does not have the skill (NONE).
+        """
+        return self._status_for(skill, candidate).status == skill_status.NONE
 
-        evidence_text = " ".join(
-            list(candidate.experience or [])
-            + list(candidate.projects or [])
-            + list(candidate.education or [])
-            + [candidate.raw_text or ""]
-        )
-        return self._text_has_negative_skill(
-            skill_lower,
-            evidence_text,
-            include_learning=not allow_learning,
+    def _record_status_rejection(
+        self,
+        result: SkillMatchResult,
+        skill: str,
+        candidate: Candidate,
+        required: bool,
+    ) -> None:
+        """
+        Notes a skill rejected because of its NONE status, for explainability.
+        """
+        status = self._status_for(skill, candidate)
+        if status.status != skill_status.NONE:
+            return
+        result.rejected_by_status.append({
+            "skill": normalize_skill_name(skill),
+            "required": required,
+            "status": status.status,
+            "status_source": status.source,
+            "evidence": status.evidence_sentence,
+            "confidence": 0.0,
+        })
+
+    def _status_skill_match(
+        self,
+        skill: str,
+        candidate: Candidate,
+        *,
+        match_type: str,
+        base_confidence: float,
+        normalized: NormalizedSkill | None = None,
+        matched_skill: str | None = None,
+        evidence_cap: bool = True,
+    ) -> SkillMatch:
+        """
+        Builds a SkillMatch whose confidence is capped by the skill's stored status:
+        LEARNING <= 0.60, WEAK <= 0.80, HAS keeps the evidence rule (<= 0.80 when the
+        CV has no supporting evidence for it).
+        """
+        status = self._status_for(skill, candidate)
+        if status.status == skill_status.HAS and matched_skill and not status.evidence:
+            # A synonym match takes the status of the candidate skill that matched.
+            status = self._status_for(matched_skill, candidate)
+        cap = skill_status.STATUS_CONFIDENCE_CAP[status.status]
+        if status.status == skill_status.HAS and evidence_cap and not self._candidate_has_skill_evidence(skill, candidate):
+            cap = min(cap, 0.80)
+        return SkillMatch(
+            skill=skill,
+            normalized=normalized,
+            match_type=match_type,
+            confidence=min(base_confidence, cap),
+            status=status.status,
+            status_source=status.source,
+            evidence=status.evidence_sentence,
+            confidence_cap=cap,
         )
 
     def _candidate_has_skill_evidence(self, skill: str, candidate: Candidate) -> bool:
         """
-        Checks candidate sections and detailed skills for positive evidence of a skill.
+        Checks for positive evidence of a HAS skill: a sentence a rule or the LLM
+        resolved as HAS, a HAS sentence in Experience/Projects, a legacy detailed skill
+        with context, a mention in experience/projects/education, or a non-stuffed
+        raw-text mention. A bare default mention (e.g. keyword stuffing) is not evidence.
         """
-        skill_lower = normalize_skill_name(skill)
-        if self._candidate_skill_is_negated(skill_lower, candidate):
+        status = self._status_for(skill, candidate)
+        if status.status != skill_status.HAS:
             return False
+        if any(
+            item.status == skill_status.HAS
+            and (item.source != skill_status.SOURCE_DEFAULT or item.section in skill_status.EVIDENCE_SECTIONS)
+            for item in status.evidence
+        ):
+            return True
+        skill_lower = normalize_skill_name(skill)
         for detail in candidate.skills_detailed or []:
-            if not isinstance(detail, dict):
-                continue
-            name = normalize_skill_name(str(detail.get("name", "")))
-            status = str(detail.get("status", "")).lower().strip()
-            context = str(detail.get("context", "")).strip()
-            if name == skill_lower and status in {"has_experience", "unknown"} and context:
+            if (
+                isinstance(detail, dict)
+                and "evidence" not in detail  # legacy rows; new rows are judged above
+                and normalize_skill_name(str(detail.get("name", ""))) == skill_lower
+                and str(detail.get("status", "")).lower().strip() in {"has_experience", "unknown"}
+                and str(detail.get("context", "")).strip()
+            ):
                 return True
-
         evidence_text = " ".join(
             list(candidate.experience or [])[:20]
             + list(candidate.projects or [])[:20]
             + list(candidate.education or [])[:10]
         ).lower()
-        if self._text_has_positive_skill(skill_lower, evidence_text):
+        if self._text_mentions_skill(skill_lower, evidence_text):
             return True
         return self._raw_text_has_non_stuffed_skill(skill_lower, candidate)
 
-    def _text_has_positive_skill(self, skill: str, text: str) -> bool:
+    @staticmethod
+    def _text_mentions_skill(skill: str, text: str) -> bool:
         """
-        Checks text for a skill mention that is not in a negative context.
+        Checks whether text names the skill; its status is decided by skill_status.
         """
-        text_lower = str(text or "").lower()
-        matches = list(build_skill_pattern(skill).finditer(text_lower))
-        if not matches:
-            return False
-        for match in matches:
-            window = text_lower[max(0, match.start() - 80): match.end() + 80]
-            if not NON_EVIDENCE_SKILL_CONTEXT.search(window):
-                return True
-        return False
-
-    def _text_has_negative_skill(self, skill: str, text: str, include_learning: bool = True) -> bool:
-        """
-        Checks text for negated skill evidence, optionally including learning-only phrases.
-        """
-        text_lower = str(text or "").lower()
-        matches = list(build_skill_pattern(skill).finditer(text_lower))
-        if not matches:
-            return False
-        negative_pattern = NON_EVIDENCE_SKILL_CONTEXT if include_learning else HARD_NEGATION_SKILL_CONTEXT
-        for match in matches:
-            window = text_lower[max(0, match.start() - 80): match.end() + 80]
-            if negative_pattern.search(window):
-                return True
-        return False
+        return bool(build_skill_pattern(skill).search(str(text or "").lower()))
 
     @staticmethod
     def _is_broad_skill_term(skill: str) -> bool:
@@ -1348,7 +1366,7 @@ class HybridMatchingEngine:
         Detects a raw-text skill mention without rewarding keyword stuffing.
         """
         raw_text = (candidate.raw_text or "").lower()
-        if not self._text_has_positive_skill(skill, raw_text):
+        if not self._text_mentions_skill(skill, raw_text):
             return False
         tokens = [token for token in raw_text.replace("/", " ").replace(",", " ").split() if token]
         if not tokens:
@@ -1431,6 +1449,14 @@ class HybridMatchingEngine:
             "optional_score_type": "confidence_weighted_coverage",
             "junior_evidence_year_credit": round(junior_evidence_year_credit, 4),
             "junior_evidence_signals": junior_evidence_signals,
+            "skill_statuses": [
+                {**match.to_dict(), "required": required}
+                for required, matches in ((True, skill_result.matched_required), (False, skill_result.matched_optional))
+                for match in matches
+            ] + skill_result.rejected_by_status,
+            "skill_status_caps": {
+                label.lower(): cap for label, cap in skill_status.STATUS_CONFIDENCE_CAP.items()
+            },
         }
         reasoning.pre_cap_score = scoring["pre_cap_score"]
         reasoning.score_cap = scoring["score_cap"]
