@@ -18,6 +18,8 @@ TASK_OWNER_TTL_SECONDS = 24 * 60 * 60
 TASK_RESULT_TTL_SECONDS = 60 * 60
 
 ProcessFunc = Callable[..., Awaitable[dict[str, Any]]]
+RefineFunc = Callable[..., Awaitable[dict[str, Any]]]
+SKILL_STATUS_TASK = "skill_status_refinement"
 
 # In-memory fallback when Redis is unavailable
 _in_memory_tasks: dict[str, dict[str, Any]] = {}
@@ -68,6 +70,59 @@ async def enqueue_cv_processing(
     return task_id
 
 
+async def enqueue_skill_status_refinement(
+    candidate_id: str,
+    raw_text_hash: str,
+    created_by_user_id: str | None = None,
+) -> str:
+    """
+    Queues the background LLM pass over a candidate's unresolved skill sentences on
+    the same queue (and worker) as CV processing.
+    """
+    task_id = str(uuid.uuid4())
+    task = {
+        "task_id": task_id,
+        "type": SKILL_STATUS_TASK,
+        "candidate_id": candidate_id,
+        "raw_text_hash": raw_text_hash,
+        "created_by_user_id": created_by_user_id,
+        "status": "queued",
+    }
+    r = await get_redis()
+    if r:
+        try:
+            await r.lpush(TASK_QUEUE_KEY, json.dumps(task))
+            return task_id
+        except Exception:
+            if settings.is_production:
+                raise
+            logger.warning("Redis push failed; queueing skill status refinement in memory")
+    elif settings.is_production:
+        raise RuntimeError("Redis is required for task queueing in production")
+    _in_memory_tasks[task_id] = task
+    return task_id
+
+
+async def _run_task(task: dict[str, Any], process_func: ProcessFunc, refine_func: RefineFunc | None) -> dict[str, Any]:
+    """
+    Runs one queued task with the handler for its type.
+    """
+    if task.get("type") == SKILL_STATUS_TASK:
+        if refine_func is None:
+            return {"status": "skipped", "reason": "no skill status handler"}
+        return await refine_func(
+            candidate_id=task["candidate_id"],
+            raw_text_hash=task.get("raw_text_hash"),
+        )
+    return await process_func(
+        cv_text=task.get("cv_text"),
+        file_name=task["file_name"],
+        use_llm=task.get("use_llm", True),
+        file_path=task.get("file_path"),
+        created_by_user_id=task.get("created_by_user_id"),
+    )
+
+
 async def get_task_result(task_id: str, owner_user_id: str) -> dict[str, Any] | None:
     """
     Returns the stored result for a queued CV task.
@@ -112,9 +167,10 @@ async def get_task_results(task_ids: list[str], owner_user_id: str) -> dict[str,
     }
 
 
-async def run_cv_worker(process_func: ProcessFunc) -> None:
+async def run_cv_worker(process_func: ProcessFunc, refine_func: RefineFunc | None = None) -> None:
     """
-    Continuously processes queued CV tasks with the provided handler.
+    Continuously processes queued CV tasks, and skill status refinement tasks when a
+    refine_func is given.
     """
     r = await get_redis()
     if r is None:
@@ -132,14 +188,10 @@ async def run_cv_worker(process_func: ProcessFunc) -> None:
                     if task is None:
                         continue
                     try:
-                        result = await process_func(
-                            cv_text=task.get("cv_text"),
-                            file_name=task["file_name"],
-                            use_llm=task.get("use_llm", True),
-                            file_path=task.get("file_path"),
-                            created_by_user_id=task.get("created_by_user_id"),
-                        )
+                        result = await _run_task(task, process_func, refine_func)
                         result["task_id"] = task_id
+                        if task.get("type") == SKILL_STATUS_TASK:
+                            result["refinement_status"] = result.get("status")
                         result["status"] = "completed"
                         _in_memory_results[task_id] = result
                     except Exception as e:
@@ -159,16 +211,17 @@ async def run_cv_worker(process_func: ProcessFunc) -> None:
 
             task = json.loads(task_data)
             task_id = task["task_id"]
+            if task.get("type") == SKILL_STATUS_TASK:
+                try:
+                    result = await _run_task(task, process_func, refine_func)
+                    logger.info("Skill status refinement task finished", extra={"task_id": task_id, **result})
+                except Exception as e:
+                    logger.error(f"Skill status refinement failed: {e}", extra={"task_id": task_id})
+                continue
             logger.info("Processing CV task", extra={"task_id": task_id, "file_name": task["file_name"]})
 
             try:
-                result = await process_func(
-                    cv_text=task.get("cv_text"),
-                    file_name=task["file_name"],
-                    use_llm=task.get("use_llm", True),
-                    file_path=task.get("file_path"),
-                    created_by_user_id=task.get("created_by_user_id"),
-                )
+                result = await _run_task(task, process_func, refine_func)
                 result["task_id"] = task_id
                 result["status"] = "completed"
 

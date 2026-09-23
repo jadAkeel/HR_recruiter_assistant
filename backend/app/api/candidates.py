@@ -39,6 +39,7 @@ from app.services.skill_catalog import (
     skill_in_text,
 )
 from app.services.skill_evidence import replace_candidate_skill_evidence
+from app.services.skill_status_refinement import schedule_refinement
 from app.services.task_queue import enqueue_cv_processing, get_task_results
 
 logger = logging.getLogger(__name__)
@@ -288,6 +289,7 @@ async def _create_candidate_from_content(
                 "Embedding update failed for existing candidate %s - candidate data saved",
                 existing_candidate.id,
             )
+        schedule_refinement(existing_candidate)
         cv_url = f"/api/v1/candidates/{existing_candidate.id}/cv"
         return CandidateRecord(
             candidate_id=existing_candidate.id,
@@ -317,6 +319,8 @@ async def _create_candidate_from_content(
             candidate_id,
         )
 
+    # Rule statuses are already saved; the LLM pass runs in the background worker.
+    schedule_refinement(candidate)
     cv_url = f"/api/v1/candidates/{candidate_id}/cv"
     return CandidateRecord(candidate_id=candidate_id, cv_url=cv_url, **profile.model_dump())
 

@@ -277,11 +277,12 @@ async def _refresh_stale_saved_matches(
     matches: list[MatchResult],
 ) -> list[MatchResult]:
     """
-    Recomputes saved matches that use outdated scoring reasoning.
+    Recomputes saved matches that use outdated scoring reasoning, or that were marked
+    stale because the candidate's skill statuses changed (background LLM refinement).
     """
     stale_matches = [
         match for match in matches
-        if not is_current_scoring_reasoning(match.reasoning)
+        if (match.is_stale or not is_current_scoring_reasoning(match.reasoning))
         and not is_interview_blended_reasoning(match.reasoning)
     ]
     if not stale_matches:

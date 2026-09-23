@@ -113,6 +113,7 @@ async def _cv_worker():
     from app.services.cv_parser import extract_text, parse_cv_text
     from app.services.candidate_text import upsert_candidate_embedding
     from app.services.skill_evidence import replace_candidate_skill_evidence
+    from app.services.skill_status_refinement import enqueue_if_needed, refine_candidate_skill_status
     from app.models.candidate import Candidate
     from sqlalchemy import select
     from pathlib import Path
@@ -215,6 +216,7 @@ async def _cv_worker():
                         )
                     if pending_path:
                         pending_path.unlink(missing_ok=True)
+                    await enqueue_if_needed(existing)
                     return {
                         "candidate_id": existing.id,
                         "cv_url": cv_url,
@@ -253,6 +255,7 @@ async def _cv_worker():
                     "Embedding generation failed for candidate %s — candidate created without vector",
                     candidate_id,
                 )
+            await enqueue_if_needed(candidate)
 
             return {
                 "candidate_id": candidate_id,
@@ -265,7 +268,14 @@ async def _cv_worker():
                 "status": "created",
             }
 
-    await run_cv_worker(process_cv)
+    async def refine_skill_status(candidate_id: str, raw_text_hash: str | None = None) -> dict:
+        """
+        Runs the background LLM pass over one candidate's unresolved skill sentences.
+        """
+        async with SessionLocal() as session:
+            return await refine_candidate_skill_status(session, candidate_id, raw_text_hash)
+
+    await run_cv_worker(process_cv, refine_skill_status)
 
 
 @asynccontextmanager
