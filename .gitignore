@@ -61,3 +61,6 @@ audit_report.json
 
 # Uploads
 uploads/
+
+# HuggingFace model cache (Render build)
+backend/.hf_cache/
