@@ -189,13 +189,14 @@ async def _cv_worker():
         pending_path = Path(file_path) if file_path else None
         if pending_path and pending_path.exists():
             content = pending_path.read_bytes()
-            cv_text = extract_text(file_name, content)
+            # CPU-bound: run in a thread so an in-API worker does not stall requests.
+            cv_text = await asyncio.to_thread(extract_text, file_name, content)
         if not cv_text:
             raise ValueError("CV text could not be extracted")
 
         async with SessionLocal() as session:
             parser = get_enhanced_cv_parser() if use_llm else None
-            profile = await parser.parse_async(cv_text) if parser else parse_cv_text(cv_text)
+            profile = await parser.parse_async(cv_text) if parser else await asyncio.to_thread(parse_cv_text, cv_text)
 
             if profile.email:
                 stmt = (

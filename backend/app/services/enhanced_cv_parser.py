@@ -603,11 +603,14 @@ class EnhancedCVParser:
         """
         text = self._ensure_parseable_text(text)
         normalized = self._normalize_text(text)
-        parsed_text = self._parse_text_for_nlp(text)
+        # Sentence parsing and rule matching are CPU-bound; keep them off the event loop.
+        parsed_text = await asyncio.to_thread(self._parse_text_for_nlp, text)
         if self.use_llm:
             skills_detailed, negative_skills, learning_skills = await self._extract_skills_with_llm(text, parsed_text)
         else:
-            skills_detailed, negative_skills, learning_skills = self._extract_skills_rule_based(normalized, text, parsed_text)
+            skills_detailed, negative_skills, learning_skills = await asyncio.to_thread(
+                self._extract_skills_rule_based, normalized, text, parsed_text
+            )
 
         uncatalogued_skills = extract_uncatalogued_skills(text, [skill.name for skill in skills_detailed])
         return self._build_profile(text, skills_detailed, negative_skills, learning_skills, uncatalogued_skills)

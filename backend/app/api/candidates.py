@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import json
 import uuid
@@ -47,7 +48,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 CV_STORAGE = Path(settings.cv_storage_path)
-PENDING_CV_STORAGE = CV_STORAGE.parent / "pending_cvs"
+# Inside CV_STORAGE so a separate worker container sharing that volume can read it.
+PENDING_CV_STORAGE = CV_STORAGE / "pending"
 MAX_CV_UPLOAD_BYTES = settings.max_upload_bytes
 ALLOWED_CV_EXTENSIONS = {".pdf", ".docx", ".txt", ""}
 
@@ -219,7 +221,8 @@ async def _create_candidate_from_content(
     Parses CV content, creates or updates the candidate, and stores its embedding.
     """
     filename = _validate_cv_filename(filename)
-    text = extract_text(filename, content)
+    # PDF extraction and rule parsing are CPU-bound; keep them off the event loop.
+    text = await asyncio.to_thread(extract_text, filename, content)
 
     if use_llm:
         parser = get_enhanced_cv_parser()
@@ -235,7 +238,7 @@ async def _create_candidate_from_content(
     else:
         from app.services.cv_parser import parse_cv_text
 
-        profile = parse_cv_text(text)
+        profile = await asyncio.to_thread(parse_cv_text, text)
         logger.info(
             "Candidate created with simple parser",
             extra={"cv_filename": filename, "skills_count": len(profile.skills)},

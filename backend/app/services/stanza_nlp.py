@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import logging
 import re
+import threading
 from dataclasses import dataclass
 
 try:
@@ -14,6 +15,9 @@ logger = logging.getLogger(__name__)
 
 STANZA_LANGUAGE = "en"
 STANZA_PROCESSORS = "tokenize"
+
+# CV parsing runs in worker threads; one shared pipeline is loaded and called at a time.
+_PIPELINE_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -65,12 +69,14 @@ def parse_text_with_stanza(text: str, *, max_chars: int = 8000) -> ParsedText:
     if not cleaned:
         return ParsedText(raw_text="", sentences=[], tokens=[], parser="empty")
 
-    pipeline = _get_stanza_pipeline()
+    with _PIPELINE_LOCK:
+        pipeline = _get_stanza_pipeline()
     if pipeline is None:
         return _fallback_parse(cleaned)
 
     try:
-        doc = pipeline(cleaned[:max_chars])
+        with _PIPELINE_LOCK:
+            doc = pipeline(cleaned[:max_chars])
     except Exception as exc:
         logger.debug("Stanza sentence splitting failed", extra={"error_type": type(exc).__name__})
         return _fallback_parse(cleaned)
