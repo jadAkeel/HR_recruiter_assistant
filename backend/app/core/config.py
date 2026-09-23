@@ -47,8 +47,10 @@ class Settings(BaseSettings):
     rag_seed_multilingual: bool = False
     rag_min_indicators: int = 2
     # Calibrated on the tuning split of tests/fixtures/rag_skill_cases.jsonl with
-    # all-MiniLM-L6-v2; see scripts/benchmark_rag_enrichment.py before changing it.
-    rag_chunk_similarity_threshold: float = 0.50
+    # all-MiniLM-L6-v2 (max F0.5, ties -> stricter). Only single-indicator cases
+    # depend on it; re-run scripts/benchmark_rag_enrichment.py --sweep before
+    # changing it or the embedding model.
+    rag_chunk_similarity_threshold: float = 0.34
     rag_match_confidence: float = 0.60
     rag_max_chunks: int = 120
 
